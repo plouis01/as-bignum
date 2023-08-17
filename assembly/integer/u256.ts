@@ -1,7 +1,7 @@
 import { i128 } from './i128';
 import { u128 } from './u128';
 import { u256toDecimalString } from "../utils";
-import { __mul256 } from '../globals';
+import { __mul256, __u256divmod_qot_hi1, __u256divmod_qot_hi2, __u256divmod_qot_lo1, __u256divmod_qot_lo2, __u256divmod_rem_hi1, __u256divmod_rem_hi2, __u256divmod_rem_lo1, __u256divmod_rem_lo2, __udivrem, shl128, shl192, shl64, shr128, shr192, shr64 } from '../globals';
 
 @lazy const HEX_CHARS = '0123456789abcdef';
 
@@ -243,6 +243,10 @@ export class u256 {
     return value.isZero();
   }
 
+  static isU64(value: u256): bool {
+    return (value.lo2 | value.hi1 | value.hi2) == 0;
+  }
+
   @inline @operator.prefix('~')
   not(): u256 {
     return new u256(~this.lo1, ~this.lo2, ~this.hi1, ~this.hi2);
@@ -389,23 +393,97 @@ export class u256 {
   @operator('>>')
   static shr(value: u256, shift: i32): u256 {
     shift &= 255;
-    var off = shift as u64;
-    if (shift <= 64) {
-      if (shift == 0) return value;
-      let hi2 =  value.hi2 >> off;
-      let hi1 = (value.hi1 >> off) | (value.hi2 << 64 - off);
-      let lo2 = (value.lo2 >> off) | (value.hi1 << 64 - off);
-      let lo1 = (value.lo1 >> off) | (value.lo2 << 64 - off);
-      return new u256(lo1, lo2, hi1, hi2);
-    } else if (shift > 64 && shift <= 128) {
-      let hi1 = value.hi2 >> 128 - off;
-      return new u256(value.lo2, value.hi1, hi1);
-    } else if (shift > 128 && shift <= 192) {
-      let lo2 = value.hi2 >> 192 - off;
-      return new u256(value.hi1, lo2);
-    } else {
-      return new u256(value.hi2 >> 256 - off);
+    if (shift % 64 == 0) {
+      switch (shift) {
+        case 0: return value;
+        case 64: return shr64(value);
+        case 128: return shr128(value);
+        case 192: return shr192(value);
+        default: new u256(0, 0, 0, 0);
+      }
     }
+    var res = new u256();
+    var a: u64 = 0;
+    var b: u64 = 0;
+
+    if (shift > 192){
+      res = shr192(value);
+      shift -= 192;
+    }
+    else {
+      if (shift > 128){
+        res = shr128(res);
+        shift -= 128;
+      }
+      else {
+        if (shift > 64){
+          res = shr64(res);
+          shift -= 64;
+        }
+        else {
+          res = value;
+
+          // remaining shifts
+          a = res.hi2 << (64 - shift);
+          res.hi2 = res.hi2 >> shift;
+        }
+        b = res.hi1 << (64 - shift);
+        res.hi1 = (res.hi1 >> shift) | a;
+      }
+      a = res.lo2 << (64 - shift);
+      res.lo2 = (res.lo2 >> shift) | b;
+    }
+    res.lo1 = (res.lo1 >> shift) | a;
+
+    return res;
+  }
+
+  @operator('<<')
+  static shl(value: u256, shift: i32): u256 {
+    shift &= 255;
+    if (shift % 64 == 0) {
+      switch (shift) {
+        case 0: return value;
+        case 64: return shl64(value);
+        case 128: return shl128(value);
+        case 192: return shl192(value);
+        default: new u256(0, 0, 0, 0);
+      }
+    }
+    var res = new u256();
+    var a: u64 = 0;
+    var b: u64 = 0;
+
+    if (shift > 192){
+      res = shl192(value);
+      shift -= 192;
+    }
+    else {
+      if (shift > 128){
+        res = shl128(res);
+        shift -= 128;
+      }
+      else {
+        if (shift > 64){
+          res = shl64(res);
+          shift -= 64;
+        }
+        else {
+          res = value;
+
+          // remaining shifts
+          a = res.lo1 >> (64 - shift);
+          res.lo1 = res.lo1 << shift;
+        }
+        b = res.lo2 >> (64 - shift);
+        res.lo2 = (res.lo2 << shift) | a;
+      }
+      a = res.hi1 >> (64 - shift);
+      res.hi1 = (res.hi1 << shift) | b;
+    }
+    res.hi2 = (res.hi2 << shift) | a;
+
+    return res;
   }
 
   @inline @operator('>>>')
@@ -461,6 +539,52 @@ export class u256 {
   @inline @operator('*')
   static mul(a: u256, b: u256): u256 {
     return __mul256(a.lo1, a.lo2, a.hi1, a.hi2, b.lo1, b.lo2, b.hi1, b.hi2)
+  }
+
+  // div return the quotient a/b = q with a,b,q u256 numbers
+  // If y == 0, return is 0 
+  @inline @operator('/')
+  static div(a: u256, b: u256): u256 {
+    if (b.isZero() || b > a) {
+      return u256.Zero
+    }
+    if (a == b) {
+      return u256.One
+    }
+
+	  // Shortcut some cases
+    if (u256.isU64(a)) return u256.fromU64(a.toU64() / b.toU64());
+
+    // At this point, we know
+	  // a/b ; a > b > 0
+
+    __udivrem([a.lo1, a.lo2, a.hi1, a.hi2], [b.lo1, b.lo2, b.hi1, b.hi2]);
+
+    return new u256(__u256divmod_qot_lo1, __u256divmod_qot_lo2, __u256divmod_qot_hi1, __u256divmod_qot_hi2);
+  }
+
+  // Mod return the modulus a%b.
+  // If y == 0, it returns 0 
+  @inline @operator('%')
+  static mod(a: u256, b: u256): u256 {
+    if (b.isZero() || a.isZero() || a == b) {
+      return u256.Zero
+    }
+    if (a < b) {
+      return a
+    }
+
+    // At this point:
+    // a != 0
+    // b != 0
+    // a > b
+
+     // Shortcut some cases
+     if (u256.isU64(a)) return u256.fromU64(a.toU64() % b.toU64());
+
+    __udivrem([a.lo1, a.lo2, a.hi1, a.hi2], [b.lo1, b.lo2, b.hi1, b.hi2])
+
+    return new u256(__u256divmod_rem_lo1, __u256divmod_rem_lo2, __u256divmod_rem_hi1, __u256divmod_rem_hi2);
   }
 
   @inline

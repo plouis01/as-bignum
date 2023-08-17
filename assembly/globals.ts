@@ -5,6 +5,14 @@ import { u128 } from './integer/u128';
 @lazy export var __divmod_quot_hi: u64 = 0;
 @lazy export var __divmod_rem_lo:  u64 = 0;
 @lazy export var __divmod_rem_hi:  u64 = 0;
+@lazy export var __u256divmod_qot_lo1: u64 = 0;
+@lazy export var __u256divmod_qot_lo2: u64 = 0;
+@lazy export var __u256divmod_qot_hi1: u64 = 0;
+@lazy export var __u256divmod_qot_hi2: u64 = 0;
+@lazy export var __u256divmod_rem_lo1: u64 = 0;
+@lazy export var __u256divmod_rem_lo2: u64 = 0;
+@lazy export var __u256divmod_rem_hi1: u64 = 0;
+@lazy export var __u256divmod_rem_hi2: u64 = 0;
 
 // used for returning low and high part of __mulq64, __multi3 etc
 @lazy export var __res128_hi: u64 = 0;
@@ -125,6 +133,21 @@ export function __uadd64(x: u64, y: u64, carry: u64 = 0): u64 {
 
 }
 
+// Sub returns the difference of x, y and borrow: diff = x - y - borrow.
+// The borrow input must be 0 or 1; otherwise the behavior is undefined.
+// The borrowOut output is guaranteed to be 0 or 1.
+// @ts-ignore: decorator
+@inline
+export function __usub64(x: u64, y: u64, borrow: u64 = 0): u64 {
+  var diff = x - y - borrow
+	// The difference will underflow if the top bit of x is not set and the top
+	// bit of y is set (^x & y) or if they are the same (^(x ^ y)) and a borrow
+	// from the lower place happens. If that borrow happens, the result will be
+	// 1 - 1 - 1 = 0 - 0 - 1 = 1 (& diff).
+	__carry = ((~x & y) | (~(x ^ y) & diff)) >> 63
+	return diff;
+}
+
 // u256 * u256 => u256 implemented from https://github.com/holiman/uint256
 // @ts-ignore: decorator
 @global
@@ -144,6 +167,232 @@ export function __mul256(x0: u64, x1: u64, x2: u64, x3: u64, y0: u64, y1: u64, y
   var hi2 = __umul64Hop(res3, x0, y3);
 
   return new u256(lo1, lo2, hi1, hi2);
+}
+
+// udivrem2by1 divides <uh, ul> / d and produces both quotient and remainder.
+// It uses the provided d's reciprocal.
+// Implementation ported from https://github.com/chfast/intx and is based on
+// "Improved division by invariant integers", Algorithm 4.
+function udivrem2by1(uh: u64, ul: u64, d: u64, reciprocal: u64): u64 {
+  let ql = __umulq64(reciprocal, uh);
+  ql = __uadd64(__res128_hi, ul, 0);
+  __res128_hi = __uadd64(__res128_hi, uh, __carry);
+  __res128_hi++;
+
+  let r = ul - __res128_hi*d;
+
+  if (r > ql) {
+    __res128_hi--;
+    r +=d;
+  }
+
+  if (r>=d) {
+    __res128_hi++;
+    r -=d;
+  }
+  
+  return r;
+}
+
+// reciprocal2by1 computes <^d, ^0> / d.
+function reciprocal2by1(d: u64): u64 {
+
+  return __udivmod128(~d, ~u64(0), d, 0);
+}
+
+// addTo computes x += y.
+// Requires len(x) >= len(y).
+function addTo(x: u64[], y: u64[]): u64 {
+  let carry: u64 = 0;
+  for (let i =0; i< y.length; i++){
+		x[i], carry = __uadd64(x[i], y[i], carry)
+  }
+  return carry;
+}
+
+// subMulTo computes x -= y * multiplier.
+// Requires len(x) >= len(y).
+function subMulTo(x: u64[], y: u64[], multiplier: u64): u64 {
+  var borrow: u64 = 0;
+  for (let i=0; i< y.length; i++){
+    var s = __usub64(x[i], borrow, 0)
+    borrow = __carry
+		var ph = __umulq64(y[i], multiplier);
+    var pl = __res128_hi;
+		var t  = __usub64(s, pl, 0)
+    x[i] = t
+		borrow += ph + __carry;
+  }
+  return borrow;
+}
+
+// udivremBy1 divides u by single normalized word d and produces both quotient and remainder.
+// The quotient is stored in provided quot.
+function udivremBy1(u: u64[], d: u64): u64{
+  const reciprocal = reciprocal2by1(d);
+  let rem = u[u.length - 1]; // Set the top word as remainder.
+  for (let j = u.length - 2; j>=0; j--){
+    rem = udivrem2by1(rem, u[j], d, reciprocal)
+    switch (j) {
+      case 0:
+        __u256divmod_qot_lo1 = __res128_hi;
+      case 1:
+        __u256divmod_qot_lo2 = __res128_hi;
+      case 2:
+        __u256divmod_qot_hi1 = __res128_hi;
+      case 3:
+        __u256divmod_qot_hi2 = __res128_hi;
+    }
+  }
+  return rem;
+}
+
+// udivremKnuth implements the division of u by normalized multiple word d from the Knuth's division algorithm.
+// The quotient is stored in provided quot - len(u)-len(d) words.
+// Updates u to contain the remainder - len(d) words.
+function udivremKnuth(u: u64[], d: u64[]): u64[] {
+  let dh = d[d.length - 1];
+  let dl = d.length >= 2 ? d[d.length - 2]: 0;
+  const reciprocal = reciprocal2by1(dh);
+
+  for (let j = u.length - d.length - 1; j>=0; j--){
+    let u2 = u[j+d.length];
+    let u1 = u.length + 1 > j+d.length ? u[j+d.length-1]: 0;
+    let u0 = u.length + 2 > j+d.length && j+d.length-2 >= 0 ? u[j+d.length-2]: 0;
+
+    let qhat: u64 =0;
+    let rhat: u64 =0;
+
+    if (u2 >= dh) { // Division overflows.
+      qhat = ~u64(0);
+    }
+    else{
+      rhat = udivrem2by1(u2, u1, dh, reciprocal);
+		  qhat = __res128_hi;
+      var ph = __umulq64(qhat, dl);
+      var pl = __res128_hi;
+			if (ph > rhat || (ph == rhat && pl > u0)) {
+				qhat--
+			}
+    }
+  
+    // Multiply and subtract.
+    const borrow = subMulTo(u.slice(j), d, qhat);
+    u[j+d.length] = u2 - borrow;
+    if(u2 < borrow) { // Too much subtracted, add back.
+      qhat--
+      u[j+d.length] += addTo(u.slice(j), d);
+    }
+    switch (j) {
+      case 0:
+        __u256divmod_qot_lo1 = qhat;
+      case 1:
+        __u256divmod_qot_lo2 = qhat;
+      case 2:
+        __u256divmod_qot_hi1 = qhat;
+      case 3:
+        __u256divmod_qot_hi2 = qhat;
+    }
+  }
+
+  return u;
+}
+
+// udivrem divides u by d and produces both quotient and remainder.
+// The quotient is stored in provided quot - len(u)-len(d)+1 words.
+// It loosely follows the Knuth's division algorithm (sometimes referenced as "schoolbook" division) using 64-bit words.
+// See Knuth, Volume 2, section 4.3.1, Algorithm D.
+// implemented from https://github.com/holiman/uint256
+// @ts-ignore: decorator
+@global
+export function __udivrem(u: u64[], d: u64[]): void {
+  let dLen: i32 = 0;
+  for (let i: i32 = d.length - 1; i >= 0; i--) {
+    if (d[i] != 0) {
+      dLen = i + 1;
+      break;
+    }
+  }
+
+  let shift: u64 = clz<u64>(d[dLen-1]);
+
+  let dn = new Array<u64>(dLen);
+  for (let i: i32 = dLen - 1; i > 0; i--) {
+    dn[i] = (d[i] << shift) | (d[i-1] >> (64 - shift));
+  }
+  dn[0] = d[0] << shift;
+
+  let uLen: i32 = 0;
+  for (let i: i32 = u.length - 1; i >= 0; i--) {
+    if (u[i] != 0) {
+      uLen = i + 1;
+      break;
+    }
+  }
+
+  if (uLen < dLen) {
+    __u256divmod_rem_lo1 = u[0];
+    __u256divmod_rem_lo2 = u[1];
+    __u256divmod_rem_hi1 = u[2];
+    __u256divmod_rem_hi2 = u[3];
+    return
+  }
+
+  let un = new Array<u64>(uLen+1);
+  un[uLen] = u[uLen-1] >> (64 - shift);
+  for (let i: i32 = uLen - 1; i > 0; i--) {
+    un[i] = (u[i] << shift) | (u[i-1] >> (64 - shift));
+  }
+  un[0] = u[0] << shift;
+
+  // TODO: Skip the highest word of numerator if not significant.
+
+  if (dLen == 1) {
+    let r: u64 = udivremBy1(un, dn[0]);
+    let rem: u256 = new u256();
+    rem.setU64(r >> shift);
+    __u256divmod_rem_lo1 = rem.lo1;
+    __u256divmod_rem_lo2 = rem.lo2;
+    __u256divmod_rem_hi1 = rem.hi1;
+    __u256divmod_rem_hi2 = rem.hi2;
+    return
+  }
+
+  un = udivremKnuth(un, dn);
+
+  let rem = new Array<u64>(dLen);
+  for (let i: i32 = 0; i < dLen-1; i++) {
+    rem[i] = (un[i] >> shift) | (un[i+1] << (64 - shift));
+  }
+  rem[dLen-1] = un[dLen-1] >> shift;
+  __u256divmod_rem_lo1 = dLen >= 1 ? rem[0]: 0;
+  __u256divmod_rem_lo2 = dLen >= 2 ? rem[1]: 0;
+  __u256divmod_rem_hi1 = dLen >= 3 ? rem[2]: 0;
+  __u256divmod_rem_hi2 = dLen >= 4 ? rem[3]: 0;
+}
+
+export function shl64(x: u256): u256 {
+	return new u256(x.lo2, x.hi1, x.hi2, 0)
+}
+
+export function shl128(x: u256): u256 {
+	return new u256(x.hi1, x.hi2, 0, 0)
+}
+
+export function shl192(x: u256): u256 {
+	return new u256(x.hi2, 0, 0, 0)
+}
+
+export function shr64(x: u256): u256 {
+	return new u256(0, x.lo1, x.lo2, x.hi1)
+}
+
+export function shr128(x: u256): u256 {
+	return new u256(0, 0, x.lo1, x.lo2)
+}
+
+export function shr192(x: u256): u256 {
+	return new u256(0, 0, 0, x.lo1)
 }
 
 // @ts-ignore: decorator
