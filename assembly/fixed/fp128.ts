@@ -2,7 +2,7 @@ import { i128 } from '../integer/i128';
 import { u128 } from '../integer/u128';
 import {
   fixedMul, fixedDiv, fixedFromInt, fixedTrunc,
-  setFixedOverflow, fractBitsOf,
+  setFixedOverflow, getFixedOverflow, fractBitsOf,
 } from './core';
 
 // Number of 32-bit digits of the raw value
@@ -209,6 +209,35 @@ export class fp128<Q> {
     var r = new fp128<Q>(i128.rem(this.value, b.value));
     setFixedOverflow(false);
     return r;
+  }
+
+  /**
+   * Power with an integer exponent, rounding each multiplication toward zero.
+   * Negative exponents give 1 / this^-exponent.
+   */
+  @operator('**')
+  pow(exponent: i32): fp128<Q> {
+    var overflow = false;
+    var result = fp128.One<Q>();
+    var tmp = this.clone();
+    var e = exponent < 0 ? -<i64>exponent : <i64>exponent;
+    while (e > 0) {
+      if (e & 1) {
+        result = result.mul(tmp);
+        overflow = overflow || getFixedOverflow();
+      }
+      e >>= 1;
+      if (e) {
+        tmp = tmp.mul(tmp);
+        overflow = overflow || getFixedOverflow();
+      }
+    }
+    if (exponent < 0) {
+      result = fp128.One<Q>().div(result);
+      overflow = overflow || getFixedOverflow();
+    }
+    setFixedOverflow(overflow);
+    return result;
   }
 
   @operator('==')
