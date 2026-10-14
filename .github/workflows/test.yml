@@ -28,3 +28,9 @@ jobs:
 
       - name: Test sources
         run: yarn test:ci
+
+      - name: Check generated fp256 sources
+        run: node scripts/generate-fp256.mjs --check
+
+      - name: Differential fuzzing against BigInt
+        run: yarn test:fuzz

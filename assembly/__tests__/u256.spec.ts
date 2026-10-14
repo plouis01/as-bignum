@@ -350,6 +350,44 @@ describe("Basic Operations", () => {
     expect(a - b).toStrictEqual(r);
   });
 
+  it("Should left shift one number", () => {
+    var a = new u256(1, 0, 0, 0);
+    expect(a << 193).toStrictEqual(new u256(0, 0, 0, 2));
+    expect(new u256(3, 0, 0, 0) << 63).toStrictEqual(new u256(0x8000000000000000, 1, 0, 0));
+  });
+
+  it("Should give zero when shifting left by 256 bits or more", () => {
+    var a = new u256(1, 0, 0, 0);
+    expect(a << 256).toStrictEqual(u256.Zero);
+    expect(a << (193 + 256)).toStrictEqual(u256.Zero);
+    expect(a << -1).toStrictEqual(u256.Zero);
+  });
+
+  it("Should invariant left shift zero number", () => {
+    var a = new u256(1, 1, 1, 1);
+    expect(a << 0).toStrictEqual(a);
+  });
+
+  it("Should right shift one number", () => {
+    var a = new u256(0, 0, 0, 4);
+    expect(a >> 193).toStrictEqual(new u256(2));
+    // issue #89: shifts of 64 bits or more
+    expect(new u256(10) >> 64).toStrictEqual(u256.Zero);
+    expect(new u256(0, 10) >> 64).toStrictEqual(new u256(10));
+  });
+
+  it("Should give zero when shifting right by 256 bits or more", () => {
+    var a = new u256(1, 0, 0, 1);
+    expect(a >> 256).toStrictEqual(u256.Zero);
+    expect(a >> (193 + 256)).toStrictEqual(u256.Zero);
+    expect(a >> -1).toStrictEqual(u256.Zero);
+  });
+
+  it("Should invariant right shift zero number", () => {
+    var a = new u256(1, 1, 1, 1);
+    expect(a >> 0).toStrictEqual(a);
+  });
+
   it("Should multiply two u256 numbers", () => {
     var a = u256.from(3);
     var b = u256.from(3);
@@ -439,4 +477,237 @@ describe("Basic Operations", () => {
     expect(b * a).toStrictEqual(r);
   });
 
+  it("Should divide u256 numbers", () => {
+    var a = u256.from(3);
+    var b = u256.from(9);
+
+    expect(b / a).toStrictEqual(a);
+  });
+
+  it("Should divide two u256 numbers", () => {
+    var a = u256.from(43545453452);
+    var b = u256.from(2353454354);
+    var n = new u256(10248516654965971928, 5);
+
+    expect(n / b).toStrictEqual(a);
+    expect(n / a).toStrictEqual(b);
+  });
+
+  it("Should divide two u256 numbers - 2", () => {
+    var a = u256.from(11);
+    var b = new u256(0, 2);
+    var n = new u256(0, 22);
+
+    expect(n / b).toStrictEqual(a);
+    expect(n / a).toStrictEqual(b);
+  });
+
+  it("Should divide two u256 numbers - 3", () => {
+    var a = new u256(0, 3);
+    var b = new u256(0, 0,3);
+    var n = new u256(0, 0,0,9);
+
+    expect(n / b).toStrictEqual(a);
+    expect(n / a).toStrictEqual(b);
+  });
+
+  it("Should divide two u256 numbers - 4", () => {
+    var a = u256.from(new u128(14083847773837265618, 6692605942));
+    var b = u256.from(new u128(18444665141527514289, 5354084802));
+    var n = new u256(5659639222556316466, 4474720309748468391, 17386035696907167262, 1);
+
+    expect(n / b).toStrictEqual(a);
+    expect(n / a).toStrictEqual(b);
+  });
+
+  it("Should divide u256 numbers by 1", () => {
+    var a = u256.Max;
+    var b = u256.One;
+    var r = a;
+
+    expect(a / b).toStrictEqual(r);
+  });
+
+  it("Should divide zero by a u256 number", () => {
+    var a = new u256(5656466, 447478468391, 17386907167262, 1);
+    var b = u256.Zero;
+    expect(b / a).toStrictEqual(b);
+  });
+
+  it("Should divide two equal u256 numbers", () => {
+    var a = new u256(0, 0, 1);
+    var b = u256.One;
+
+    expect(a / a).toStrictEqual(b);
+  });
+
+  it("Should divide two u256 numbers with d<a<b", () => {
+    var a = u256.from(43545453452);
+    var b = new u256(10248516654965971928, 5);
+    var d = u256.from(2353454354);
+    var r = u256.Zero;
+
+    expect(d / b).toStrictEqual(r);
+    expect(d / a).toStrictEqual(r);
+  });
+
+  it("Should divide two numbers without remainder 1", () => {
+    let a = new u256(10248516657319426282, 5);
+    let b = u256.from(2353454354);
+    expect(a / b).toStrictEqual(u256.from(43545453453));
+  });
+
+  it("Should divide two numbers without remainder 2", () => {
+    let a = new u256(10248516654965971928, 5);
+    let b = u256.from(43545453452);
+    expect(a / b).toStrictEqual(u256.from(2353454354));
+  });
+
+  it("Should divide two numbers without remainder 3", () => {
+    let a = new u256(3152652666208173568, 2);
+    let b = u256.from(4354545345312);
+    expect(a / b).toStrictEqual(u256.from(9196400));
+  });
+
+  it("Should divide two numbers without remainder 4", () => {
+    let a = u256.from(u128.from('9801427805542018869750100000000'));
+    let b = u256.from(10);
+    expect(a / b).toStrictEqual(u256.from(u128.from('980142780554201886975010000000')));
+  });
+
+  it("Should divide two numbers with remainder 1", () => {
+    let a = new u256(3152652666208173568, 2);
+    let b = u256.from(43543534534534);
+    expect(a / b).toStrictEqual(u256.from(919680));
+  });
+
+  it("Should divide two numbers with remainder 2", () => {
+    let a = new u256(3152652666208178,0);
+    let b = u256.from(43543534534534);
+    expect(a / b).toStrictEqual(u256.from(72));
+  });
+
+  it("Should divide zero with number", () => {
+    let a = u256.Zero;
+    let b = new u256(10248516654965971928, 5);
+    expect(a / b).toStrictEqual(u256.Zero);
+  });
+
+  it("Should divide number with one", () => {
+    let a = new u256(10248516654965971928, 5);
+    let b = u256.One;
+    expect(a / b).toStrictEqual(a);
+  });
+
+  it("Should mod two numbers without remainder", () => {
+    let a = u256.from(u128.from('9801427805542018869750100000000'));
+    let b = u256.from(10);
+    expect(a % b).toStrictEqual(u256.Zero);
+  });
+
+  it("Should mod two numbers without remainder 2", () => {
+    let a = new u256(10248516654965971928, 5);
+    let b = u256.from(43545453452);
+    expect(a % b).toStrictEqual(u256.Zero);
+  });
+
+  it("Should mod two numbers with remainder 1", () => {
+    let a = new u256(3152652666208173568, 2);
+    let b = u256.from(43543534534534);
+    expect(a % b).toStrictEqual(u256.from(22972907047680));
+  });
+
+  it("Should mod two numbers with remainder 2", () => {
+    let a = new u256(3152652666208178);
+    let b = u256.from(43543534534534);
+    expect(a % b).toStrictEqual(u256.from(17518179721730));
+  });
+
+  it("Should mod two numbers with remainder 3", () => {
+    let a = new u256(987775983032474055, 5421010862427527591, 2);
+    let b = new u256(43543534534534);
+    expect(a % b).toStrictEqual(new u256(33195245235237));
+  });
+
+  it("Should mod number with one", () => {
+    let a = new u256(10248516654965971928, 5);
+    let b = u256.One;
+    expect(a % b).toStrictEqual(u256.Zero);
+  });
+
+  it("Should mod number with two", () => {
+    let a = u256.from(u128.from('9801427805542018869750100000001'));
+    let b = u256.from(2);
+    expect(a % b).toStrictEqual(u256.One);
+  });
+
+  it("Should mod number with four", () => {
+    let a = u256.from(u128.from('1427864420188697501000003'));
+    let b = u256.from(4);
+    expect(a % b).toStrictEqual(new u256(3));
+  });
+
+  it("Should mod number with 128", () => {
+    let a = u256.from(4);
+    let b = u256.from(128);
+    expect(a % b).toStrictEqual(a);
+  });
+
+  it("Should mod number with 256", () => {
+    let a = u256.from(41);
+    let b = u256.from(256);
+    expect(a % b).toStrictEqual(a);
+  });
+
+  it("Should mod number same number 1", () => {
+    let a = u256.from(8);
+    let b = u256.from(8);
+    expect(a % b).toStrictEqual(u256.Zero);
+  });
+
+  it("Should mod number same number 2", () => {
+    let a = new u256(10248516654965971928, 5, 2, 100);
+    expect(a % a).toStrictEqual(u256.Zero);
+  });
+
+  it("Should divide two same numbers", () => {
+    let a = new u256(10248516654965971928, 5, 6, 8);
+    expect(a / a).toStrictEqual(u256.One);
+  });
+
+  it("Should mod number same max value", () => {
+    let a = u256.Max;
+    expect(a % a).toStrictEqual(u256.Zero);
+  });
+
+  it("Should div number same max value", () => {
+    let a = u256.Max;
+    expect(a / a).toStrictEqual(u256.One);
+  });
+});
+
+describe("Throwable", () => {
+  it("Should throw on division by zero", () => {
+    expect(() => {
+      !(new u256(1, 2, 3, 4) / u256.Zero);
+    }).toThrow();
+  });
+
+  it("Should throw on remainder by zero", () => {
+    expect(() => {
+      !(new u256(1, 2, 3, 4) % u256.Zero);
+    }).toThrow();
+  });
+
+  it("Should throw when the muldiv result doesn't fit", () => {
+    expect(() => {
+      !(u256.muldiv(u256.Max, u256.Max, u256.One));
+    }).toThrow();
+  });
+
+  it("Should throw from string with unsupported radix", () => {
+    expect(() => {
+      !(u256.fromString('1234', 37));
+    }).toThrow();
+  });
 });

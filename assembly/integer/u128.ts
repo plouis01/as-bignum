@@ -19,9 +19,12 @@ import {
   __divmod_rem_hi,
 } from '../globals';
 
-import { atou128, u128toDecimalString } from '../utils';
-
-@lazy const HEX_CHARS = '0123456789abcdef';
+import { atou128 } from '../utils';
+import {
+  bufA, bufB, bufQ, bufR, bufP,
+  wordsMul, wordsDivRem, wordsZeroFrom, wordsToString,
+} from '../multiword';
+import { __floatFromWords, __wordsFromFloat } from '../globals';
 
 export class u128 {
 
@@ -65,18 +68,19 @@ export class u128 {
     return new u128(value);
   }
 
-  // TODO need improvement
-  // max safe uint for f64 actually 53-bits
-  @inline
+  /**
+   * Create from a float, truncating toward zero. Negative values give their two's
+   * complement, values of 2^128 or more keep their low 128 bits.
+   * Throws on NaN and infinity.
+   */
   static fromF64(value: f64): u128 {
-    return new u128(<u64>value, reinterpret<i64>(value) >> 63);
+    __wordsFromFloat(value, bufA, 4);
+    return new u128(load<u64>(bufA), load<u64>(bufA, 8));
   }
 
-  // TODO need improvement
-  // max safe int for f32 actually 23-bits
   @inline
   static fromF32(value: f32): u128 {
-    return new u128(<u64>value, <u64>(reinterpret<i32>(value) >> 31));
+    return u128.fromF64(<f64>value);
   }
 
   @inline
@@ -227,17 +231,17 @@ export class u128 {
     return !(this.lo | this.hi);
   }
 
-  @inline @operator.prefix('~')
+  @operator.prefix('~')
   not(): u128 {
     return new u128(~this.lo, ~this.hi);
   }
 
-  @inline @operator.prefix('+')
+  @operator.prefix('+')
   pos(): u128 {
     return this;
   }
 
-  @inline @operator.prefix('-')
+  @operator.prefix('-')
   neg(): u128 {
     var lo = ~this.lo;
     var hi = ~this.hi;
@@ -293,9 +297,13 @@ export class u128 {
     return new u128(a.lo & b.lo, a.hi & b.hi);
   }
 
+  /**
+   * Shift left. Like Solidity, shifting by 128 bits or more (or by a negative amount)
+   * gives zero.
+   */
   @inline @operator('<<')
   static shl(value: u128, shift: i32): u128 {
-    shift &= 127;
+    if (<u32>shift >= 128) return u128.Zero;
 
     // need for preventing redundant i32 -> u64 extends
     var shift64 = shift as u64;
@@ -314,9 +322,13 @@ export class u128 {
     return new u128(lo & mod2, hi);
   }
 
+  /**
+   * Logical shift right. Shifting by 128 bits or more (or by a negative amount)
+   * gives zero.
+   */
   @inline @operator('>>')
   static shr(value: u128, shift: i32): u128 {
-    shift &= 127;
+    if (<u32>shift >= 128) return u128.Zero;
 
     // need for preventing redundant i32 -> u64 extends
     var shift64 = shift as u64;
@@ -601,11 +613,17 @@ export class u128 {
    */
   @inline
   static ord(a: u128, b: u128): i32 {
-    var dlo = a.lo - b.lo;
-    var dhi = a.hi - b.hi;
-    var cmp = <i32>select<i64>(dhi, dlo, dhi != 0);
-    // normalize to [-1, 0, 1]
-    return i32(cmp > 0) - i32(cmp < 0);
+    return i32(u128.gt(a, b)) - i32(u128.lt(a, b));
+  }
+
+  @inline
+  static min(a: u128, b: u128): u128 {
+    return u128.lt(b, a) ? b.clone() : a.clone();
+  }
+
+  @inline
+  static max(a: u128, b: u128): u128 {
+    return u128.lt(a, b) ? b.clone() : a.clone();
   }
 
   /**
@@ -653,80 +671,87 @@ export class u128 {
    * @returns 128-bit unsigned integer
    */
   sqr(): this {
-    var u = this.lo,
-        v = this.hi;
-
-    var u1 = u & 0xFFFFFFFF;
-    var t  = u1 * u1;
-    var w  = t & 0xFFFFFFFF;
-    var k  = t >> 32;
-
-    u >>= 32;
-    var m = u * u1;
-    t = m + k;
-    var w1 = t >> 32;
-
-    t = m + (t & 0xFFFFFFFF);
-
-    var lo = (t << 32) + w;
-    var hi  = u * u;
-        hi += w1 + (t >> 32);
-        hi += u * v << 1;
-
+    var lo = __multi3(this.lo, this.hi, this.lo, this.hi);
+    this.hi = __res128_hi;
     this.lo = lo;
-    this.hi = hi;
-
     return this;
   }
 
   /**
-   * Calculate multiply and division as `number * numerator / denominator`
-   * without overflow in multiplication part.
+   * Calculate `number * numerator / denominator` rounded down, with a full precision
+   * (256-bit) intermediate product, like OpenZeppelin's `Math.mulDiv`.
+   * Throws if `denominator` is zero or if the result doesn't fit in 128 bits.
    *
    * @returns 128-bit unsigned integer
    */
   static muldiv(number: u128, numerator: u128, denominator: u128): u128 {
-    let a = number;
-    let b = numerator;
-    let c = denominator;
+    u128.mulFull(number, numerator);
+    u128.divProduct(denominator);
+    return new u128(load<u64>(bufQ), load<u64>(bufQ, 8));
+  }
 
-    let ql = __udivmod128(b.lo, b.hi, c.lo, c.hi);
-
-    let qn = new u128(ql, __divmod_quot_hi);             // b / c
-    let rn = new u128(__divmod_rem_lo, __divmod_rem_hi); // b % c
-
-    let q = u128.Zero;
-    let r = u128.Zero;
-    let n = a.clone();
-
-    while (!n.isZero()) {
-      if (n.lo & 1) {
-        // @ts-ignore
-        q += qn;
-        // @ts-ignore
-        r += rn;
-        if (r >= c) {
-          // @ts-ignore
-          ++q;
-          // @ts-ignore
-          r -= c;
-        }
-      }
-      // @ts-ignore
-      n >>= 1;
-      // @ts-ignore
-      qn <<= 1;
-      // @ts-ignore
-      rn <<= 1;
-
-      if (rn >= c) {
-        // @ts-ignore
-        ++qn;
-        // @ts-ignore
-        rn -= c;
-      }
+  /**
+   * Same as `muldiv`, rounded up.
+   */
+  static muldivUp(number: u128, numerator: u128, denominator: u128): u128 {
+    var q = u128.muldiv(number, numerator, denominator);
+    if (!wordsZeroFrom(bufR, 0, 4)) {
+      if (q == u128.Max) throw new RangeError("Overflow in muldiv");
+      q.preInc();
     }
     return q;
+  }
+
+  /**
+   * `(a * b) % c` computed with a full precision product, like Solidity's `mulmod`.
+   * Throws if `c` is zero.
+   */
+  static mulmod(a: u128, b: u128, c: u128): u128 {
+    if (c.isZero()) throw new RangeError("Division by zero");
+    u128.mulFull(a, b);
+    store<u64>(bufB, c.lo);
+    store<u64>(bufB, c.hi, 8);
+    wordsDivRem(bufP, 8, bufB, 4, bufQ, bufR);
+    return new u128(load<u64>(bufR), load<u64>(bufR, 8));
+  }
+
+  /**
+   * `(a + b) % c` computed without overflow, like Solidity's `addmod`.
+   * Throws if `c` is zero.
+   */
+  static addmod(a: u128, b: u128, c: u128): u128 {
+    if (c.isZero()) throw new RangeError("Division by zero");
+    var sum = u128.add(a, b);
+    store<u64>(bufP, sum.lo);
+    store<u64>(bufP, sum.hi, 8);
+    store<u64>(bufP, <u64>u128.lt(sum, a), 16);
+    store<u64>(bufB, c.lo);
+    store<u64>(bufB, c.hi, 8);
+    wordsDivRem(bufP, 6, bufB, 4, bufQ, bufR);
+    return new u128(load<u64>(bufR), load<u64>(bufR, 8));
+  }
+
+  /**
+   * Full 256-bit product of `a` and `b` into `bufP` (8 digits).
+   * Returns true if the product doesn't fit in 128 bits.
+   */
+  static mulFull(a: u128, b: u128): bool {
+    store<u64>(bufA, a.lo);
+    store<u64>(bufA, a.hi, 8);
+    store<u64>(bufB, b.lo);
+    store<u64>(bufB, b.hi, 8);
+    wordsMul(bufA, 4, bufB, 4, bufP);
+    return !wordsZeroFrom(bufP, 4, 8);
+  }
+
+  // divide the product in bufP by `denominator`: quotient into bufQ, remainder into bufR.
+  // Throws on division by zero and if the quotient doesn't fit in 128 bits.
+  private static divProduct(denominator: u128): void {
+    if (denominator.isZero()) throw new RangeError("Division by zero");
+    store<u64>(bufB, denominator.lo);
+    store<u64>(bufB, denominator.hi, 8);
+    wordsDivRem(bufP, 8, bufB, 4, bufQ, bufR);
+    if (!wordsZeroFrom(bufQ, 4, 8)) throw new RangeError("Overflow in muldiv");
   }
 
   /**
@@ -766,15 +791,12 @@ export class u128 {
   }
 
   /**
-  * Convert to 64-bit signed integer
+  * Convert to 64-bit signed integer (low 64 bits)
   * @returns 64-bit signed integer
   */
   @inline
   toI64(): i64 {
-    return <i64>(
-      (this.lo & 0x7FFFFFFFFFFFFFFF) |
-      (this.hi & 0x8000000000000000)
-    );
+    return <i64>this.lo;
   }
 
   /**
@@ -787,12 +809,12 @@ export class u128 {
   }
 
   /**
-  * Convert to 32-bit signed integer
+  * Convert to 32-bit signed integer (low 32 bits)
   * @returns 32-bit signed integer
   */
   @inline
   toI32(): i32 {
-    return <i32>this.toI64();
+    return <i32>this.lo;
   }
 
   /**
@@ -864,6 +886,7 @@ export class u128 {
       else if (dummy instanceof Uint8Array) return <T>this.toUint8Array();
       else if (dummy instanceof i128) return <T>this.toI128();
       else if (dummy instanceof u128) return <T>this;
+      else if (dummy instanceof i256) return <T>this.toI256();
       else if (dummy instanceof u256) return <T>this.toU256();
       else throw new TypeError('Unsupported generic type');
     }
@@ -935,20 +958,12 @@ export class u128 {
     return new u128(this.lo, this.hi);
   }
 
+  /**
+   * Format in base `radix` (2 to 36), lowercase, without prefix
+   */
   toString(radix: i32 = 10): string {
-    assert(radix == 10 || radix == 16, 'radix argument must be between 10 or 16');
-    if (this.isZero()) return '0';
-
-    var result = '';
-    if (radix == 16) {
-      let shift: i32 = 124 - (u128.clz(this) & ~3);
-      while (shift >= 0) {
-        // @ts-ignore
-        result += HEX_CHARS.charAt(<i32>((this >> shift).lo & 15));
-        shift  -= 4;
-      }
-      return result;
-    }
-    return u128toDecimalString(this);
+    store<u64>(bufA, this.lo);
+    store<u64>(bufA, this.hi, 8);
+    return wordsToString(bufA, 4, radix);
   }
 }
