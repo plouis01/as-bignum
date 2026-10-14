@@ -886,6 +886,7 @@ export class u128 {
       else if (dummy instanceof Uint8Array) return <T>this.toUint8Array();
       else if (dummy instanceof i128) return <T>this.toI128();
       else if (dummy instanceof u128) return <T>this;
+      else if (dummy instanceof i256) return <T>this.toI256();
       else if (dummy instanceof u256) return <T>this.toU256();
       else throw new TypeError('Unsupported generic type');
     }

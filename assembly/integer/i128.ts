@@ -456,6 +456,14 @@ export class i128 {
   }
 
   /**
+   * Convert to 256-bit signed integer (sign extended)
+   */
+  @inline
+  toI256(): i256 {
+    return i256.fromI128(this);
+  }
+
+  /**
    * Convert to 256-bit unsigned integer (sign extended two's complement)
    */
   @inline
@@ -547,6 +555,7 @@ export class i128 {
       else if (dummy instanceof Uint8Array)      return <T>this.toUint8Array();
       else if (dummy instanceof i128)            return <T>this;
       else if (dummy instanceof u128)            return <T>this.toU128();
+      else if (dummy instanceof i256)            return <T>this.toI256();
       else if (dummy instanceof u256)            return <T>this.toU256();
       else throw new TypeError('Unsupported generic type');
     } else throw new TypeError('Unsupported generic type');

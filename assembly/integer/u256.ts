@@ -1,5 +1,6 @@
 import { i128 } from './i128';
 import { u128 } from './u128';
+import { i256 } from './i256';
 import { __mul256, __floatFromWords, __wordsFromFloat } from '../globals';
 import {
   bufA, bufB, bufQ, bufR, bufP,
@@ -25,6 +26,11 @@ export class u256 {
 
   @inline
   static fromU256(value: u256): u256 {
+    return new u256(value.lo1, value.lo2, value.hi1, value.hi2);
+  }
+
+  @inline
+  static fromI256(value: i256): u256 {
     return new u256(value.lo1, value.lo2, value.hi1, value.hi2);
   }
 
@@ -181,6 +187,7 @@ export class u256 {
     else if (value instanceof f64)        return u256.fromF64(<f64>value);
     else if (value instanceof i128)       return u256.fromI128(<i128>value);
     else if (value instanceof u128)       return u256.fromU128(<u128>value);
+    else if (value instanceof i256)       return u256.fromI256(<i256>value);
     else if (value instanceof u256)       return u256.fromU256(<u256>value);
     else if (value instanceof u8[])       return u256.fromBytes(<u8[]>value);
     else if (value instanceof Uint8Array) return u256.fromBytes(<Uint8Array>value);
@@ -687,6 +694,15 @@ export class u256 {
   }
 
   /**
+   * Convert to 256-bit signed integer (same bits)
+   * @returns 256-bit signed integer
+   */
+  @inline
+  toI256(): i256 {
+    return new i256(this.lo1, this.lo2, this.hi1, this.hi2);
+  }
+
+  /**
    * Convert to 256-bit unsigned integer
    * @returns 256-bit unsigned integer
    */
@@ -827,6 +843,7 @@ export class u256 {
       else if (dummy instanceof Uint8Array)      return <T>this.toUint8Array();
       else if (dummy instanceof i128)            return <T>this.toI128();
       else if (dummy instanceof u128)            return <T>this.toU128();
+      else if (dummy instanceof i256)            return <T>this.toI256();
       else if (dummy instanceof u256)            return <T>this;
       else throw new TypeError('Unsupported generic type');
     } else throw new TypeError('Unsupported generic type');
