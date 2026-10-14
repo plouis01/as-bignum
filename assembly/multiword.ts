@@ -11,7 +11,7 @@ import { CharCode } from "util/string";
 // reentrant (which is fine: they never call back into user code).
 
 // @ts-ignore: decorator
-@lazy export const MAX_WORDS = 16; // 512 bits
+@lazy export const MAX_WORDS = 48; // 1536 bits (fixed point parsing needs 10^255 * 2^254)
 
 // @ts-ignore: decorator
 @lazy const scratchU  = memory.data((MAX_WORDS + 1) << 2, 8); // normalized dividend

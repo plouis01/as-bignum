@@ -1,7 +1,8 @@
+import { CharCode } from "util/string";
 import {
   MAX_WORDS,
   wordsClear, wordsNeg, wordsMul, wordsDivRem, wordsShl, wordsShr, wordsSqrt,
-  wordsZeroFrom, wordsLength,
+  wordsZeroFrom, wordsMulAddSmall, wordsToString, wordsLength,
 } from "../multiword";
 
 // Fixed point arithmetic on signed two's complement numbers of `n` 32-bit digits (n = 4
@@ -107,6 +108,113 @@ export function fixedSqrt(a: usize, n: i32, F: i32, out: usize): void {
   wordsSqrt(fpA, 2 * n, fpQ);
   // the root of a number below 2^(32n - 1 + F) is below 2^(32n - 1) when F < 32n
   memory.copy(out, fpQ, <usize>n << 2);
+}
+
+/**
+ * Format `a` in base 10. `decimals` < 0 prints all the fractional digits (the decimal
+ * expansion of a binary fraction is finite), otherwise exactly `decimals` digits
+ * (truncated toward zero).
+ */
+export function fixedToString(a: usize, n: i32, F: i32, decimals: i32): string {
+  var neg = magnitude(a, n, fpA, n + 1);
+  // integer part
+  wordsShr(fpA, n, F, fpB);
+  var result = wordsToString(fpB, n, 10);
+  // fractional part: keep the low F bits
+  wordsShl(fpA, n + 1, (n + 1) * 32 - F, fpA);
+  wordsShr(fpA, n + 1, (n + 1) * 32 - F, fpA);
+  var hasFract = wordsLength(fpA, n + 1) != 0;
+  if (decimals != 0 && (hasFract || decimals > 0)) {
+    result += ".";
+    let count = 0;
+    let trailing = 0; // length without trailing zeros
+    while (decimals < 0 ? wordsLength(fpA, n + 1) != 0 : count < decimals) {
+      // next digit = (fract * 10) >> F
+      wordsMulAddSmall(fpA, n + 1, 10, 0);
+      wordsShr(fpA, n + 1, F, fpB);
+      let digit = load<u32>(fpB);
+      result += String.fromCharCode(CharCode._0 + <i32>digit);
+      ++count;
+      if (digit != 0) trailing = count;
+      wordsShl(fpA, n + 1, (n + 1) * 32 - F, fpA);
+      wordsShr(fpA, n + 1, (n + 1) * 32 - F, fpA);
+    }
+    if (decimals < 0) result = result.substring(0, result.length - (count - trailing));
+  }
+  // no sign when every printed digit is zero (e.g. -0.25 with 0 decimals)
+  if (neg) {
+    for (let i = 0, len = result.length; i < len; ++i) {
+      let code = result.charCodeAt(i);
+      if (code > CharCode._0 && code <= CharCode._9) return "-" + result;
+    }
+  }
+  return result;
+}
+
+// @ts-ignore: decorator
+@lazy const MAX_FRACT_DIGITS = 255; // the exact representation has at most 254 digits
+
+/**
+ * Parse a decimal string such as `-12.375` (optional sign, digits, optional `.` and
+ * fractional digits, stops at the first other character). The fraction is rounded toward
+ * zero to the nearest multiple of 2^-F; fractional digits after the 255th are ignored
+ * (the exact value of a number with F fractional bits has F fractional digits).
+ * Returns true if the value doesn't fit.
+ */
+export function fixedFromString(str: string, n: i32, F: i32, out: usize): bool {
+  var m = 2 * n + 1;
+  var len = str.length;
+  var index = 0;
+  var neg = false;
+  if (len) {
+    let first = str.charCodeAt(0);
+    neg = first == CharCode.MINUS;
+    if (neg || first == CharCode.PLUS) ++index;
+  }
+  // integer part into fpA (m digits), remembering if it overflowed
+  wordsClear(fpA, m);
+  var overflow = false;
+  for (; index < len; ++index) {
+    let d = <u32>(str.charCodeAt(index) - CharCode._0);
+    if (d > 9) break;
+    if (wordsMulAddSmall(fpA, m, 10, d)) overflow = true;
+  }
+  if (!wordsZeroFrom(fpA, n, m)) overflow = true;
+  wordsShl(fpA, m, F, fpA);
+
+  // fractional digits: fract * 2^F / 10^k, computed on MAX_WORDS digits
+  // (fract < 10^255 < 2^848 and F < 256)
+  if (index < len && str.charCodeAt(index) == CharCode.DOT) {
+    ++index;
+    let mf = MAX_WORDS;
+    wordsClear(fpB, mf);
+    wordsClear(fpP, mf);
+    store<u32>(fpP, 1); // 10^k
+    let k = 0;
+    for (; index < len; ++index) {
+      let d = <u32>(str.charCodeAt(index) - CharCode._0);
+      if (d > 9) break;
+      if (k < MAX_FRACT_DIGITS) {
+        wordsMulAddSmall(fpB, mf, 10, d);
+        wordsMulAddSmall(fpP, mf, 10, 0);
+        ++k;
+      }
+    }
+    if (k) {
+      wordsShl(fpB, mf, F, fpB);
+      wordsDivRem(fpB, mf, fpP, mf, fpQ, fpR);
+      wordsClear(fpQ + (<usize>mf << 2), W - mf);
+      // add to the integer part (the quotient is below 2^F)
+      let c: u64 = 0;
+      for (let i = 0; i < m; ++i) {
+        let off = <usize>i << 2;
+        let t = <u64>load<u32>(fpA + off) + <u64>load<u32>(fpQ + off) + c;
+        store<u32>(fpA + off, <u32>t);
+        c = t >> 32;
+      }
+    }
+  }
+  return fixedOverflow = finish(fpA, m, neg, n, out) || overflow;
 }
 
 /** out = a << F (an integer converted to fixed point) */

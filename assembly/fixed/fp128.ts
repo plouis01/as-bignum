@@ -1,7 +1,7 @@
 import { i128 } from '../integer/i128';
 import { u128 } from '../integer/u128';
 import {
-  fixedMul, fixedDiv, fixedSqrt, fixedFromInt, fixedTrunc,
+  fixedMul, fixedDiv, fixedSqrt, fixedToString, fixedFromString, fixedFromInt, fixedTrunc,
   setFixedOverflow, getFixedOverflow, fractBitsOf,
 } from './core';
 
@@ -116,6 +116,15 @@ export class fp128<Q> {
     return fp128.fromF64<Q>(<f64>value);
   }
 
+  /**
+   * Parse a decimal number such as `-12.375` (rounded toward zero)
+   */
+  static fromString<Q>(value: string): fp128<Q> {
+    var r = new i128();
+    fixedFromString(value, N, fractBitsOf<Q>(), ptr(r));
+    return new fp128<Q>(r);
+  }
+
   @inline
   static from<Q, T>(value: T): fp128<Q> {
          if (value instanceof bool)   return fp128.fromU64<Q>(<u64>value);
@@ -131,6 +140,7 @@ export class fp128<Q> {
     else if (value instanceof f64)    return fp128.fromF64<Q>(<f64>value);
     else if (value instanceof i128)   return fp128.fromI128<Q>(<i128>value);
     else if (value instanceof u128)   return fp128.fromU128<Q>(<u128>value);
+    else if (value instanceof String) return fp128.fromString<Q>(<string>value);
     else throw new TypeError("Unsupported generic type");
   }
 
@@ -399,5 +409,14 @@ export class fp128<Q> {
 
   clone(): fp128<Q> {
     return new fp128<Q>(this.value.clone());
+  }
+
+  /**
+   * Decimal representation. By default prints the exact value (the decimal expansion of
+   * a binary fraction is finite); with `decimals` >= 0, prints exactly that many
+   * fractional digits, truncated toward zero.
+   */
+  toString(decimals: i32 = -1): string {
+    return fixedToString(ptr(this.value), N, fractBitsOf<Q>(), decimals);
   }
 }
