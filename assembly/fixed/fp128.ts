@@ -307,6 +307,17 @@ export class fp128<Q> {
     return new fp128<Q>(r);
   }
 
+  /**
+   * `this * b / c` with a full precision intermediate product, rounded toward zero.
+   * Throws if `c` is zero or if the result doesn't fit.
+   */
+  muldiv(b: fp128<Q>, c: fp128<Q>): fp128<Q> {
+    // the scale factors cancel out: (x 2^F)(y 2^F) / (z 2^F) = (x y / z) 2^F
+    var r = new fp128<Q>(i128.muldiv(this.value, b.value, c.value));
+    setFixedOverflow(false);
+    return r;
+  }
+
   /** Integer part, rounded toward zero */
   toI128(): i128 {
     var r = new i128();
