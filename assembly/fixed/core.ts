@@ -1,6 +1,6 @@
 import {
   MAX_WORDS,
-  wordsClear, wordsNeg, wordsMul, wordsDivRem, wordsShl, wordsShr,
+  wordsClear, wordsNeg, wordsMul, wordsDivRem, wordsShl, wordsShr, wordsSqrt,
   wordsZeroFrom, wordsLength,
 } from "../multiword";
 
@@ -96,6 +96,17 @@ export function fixedDiv(a: usize, b: usize, n: i32, F: i32, out: usize): bool {
   wordsShl(fpA, 2 * n, F, fpA);
   wordsDivRem(fpA, 2 * n, fpB, n, fpQ, fpR);
   return fixedOverflow = finish(fpQ, 2 * n, negA != negB, n, out);
+}
+
+/** out = sqrt(a), throws if a is negative */
+export function fixedSqrt(a: usize, n: i32, F: i32, out: usize): void {
+  if (isNeg(a, n)) throw new RangeError("Square root of a negative number");
+  // sqrt(r / 2^F) = sqrt(r * 2^F) / 2^F
+  magnitude(a, n, fpA, 2 * n);
+  wordsShl(fpA, 2 * n, F, fpA);
+  wordsSqrt(fpA, 2 * n, fpQ);
+  // the root of a number below 2^(32n - 1 + F) is below 2^(32n - 1) when F < 32n
+  memory.copy(out, fpQ, <usize>n << 2);
 }
 
 /** out = a << F (an integer converted to fixed point) */

@@ -1,7 +1,7 @@
 import { i128 } from '../integer/i128';
 import { u128 } from '../integer/u128';
 import {
-  fixedMul, fixedDiv, fixedFromInt, fixedTrunc,
+  fixedMul, fixedDiv, fixedSqrt, fixedFromInt, fixedTrunc,
   setFixedOverflow, getFixedOverflow, fractBitsOf,
 } from './core';
 
@@ -295,6 +295,16 @@ export class fp128<Q> {
     if (this.isNeg()) return this.neg();
     setFixedOverflow(false);
     return this.clone();
+  }
+
+  /**
+   * Square root, rounded down. Throws for negative values.
+   */
+  sqrt(): fp128<Q> {
+    var r = new i128();
+    fixedSqrt(ptr(this.value), N, fractBitsOf<Q>(), ptr(r));
+    setFixedOverflow(false);
+    return new fp128<Q>(r);
   }
 
   /** Integer part, rounded toward zero */

@@ -333,3 +333,55 @@ export function wordsBitLength(ptr: usize, n: i32): i32 {
   n = wordsLength(ptr, n);
   return n == 0 ? 0 : (n << 5) - <i32>clz(getW(ptr, n - 1));
 }
+
+// @ts-ignore: decorator
+@lazy const sqrtX = memory.data(MAX_WORDS << 2, 8);
+// @ts-ignore: decorator
+@lazy const sqrtY = memory.data(MAX_WORDS << 2, 8);
+// @ts-ignore: decorator
+@lazy const sqrtQ = memory.data(MAX_WORDS << 2, 8);
+// @ts-ignore: decorator
+@lazy const sqrtR = memory.data(MAX_WORDS << 2, 8);
+
+/**
+ * out[0..n) = floor(sqrt(ptr[0..n))), with Newton's method.
+ * `ptr` and `out` must not be the private scratch buffers of this function.
+ */
+export function wordsSqrt(ptr: usize, n: i32, out: usize): void {
+  var bits = wordsBitLength(ptr, n);
+  wordsClear(out, n);
+  if (bits <= 1) {
+    if (bits == 1) setW(out, 0, 1);
+    return;
+  }
+  // x = 2^ceil(bits / 2) >= sqrt(value): the iterations then decrease monotonically to
+  // floor(sqrt(value))
+  wordsClear(sqrtX, n);
+  var e = (bits + 1) >> 1;
+  setW(sqrtX, e >> 5, 1 << <u32>(e & 31));
+  while (true) {
+    // y = (x + value / x) / 2
+    wordsDivRem(ptr, n, sqrtX, n, sqrtQ, sqrtR);
+    let c: u64 = 0;
+    for (let i = 0; i < n; ++i) {
+      let t = <u64>getW(sqrtX, i) + <u64>getW(sqrtQ, i) + c;
+      setW(sqrtY, i, <u32>t);
+      c = t >> 32;
+    }
+    wordsShr(sqrtY, n, 1, sqrtY);
+    // x and value / x are both < 2^(n * 32), so the carry is the top bit of the half sum
+    if (c) setW(sqrtY, n - 1, getW(sqrtY, n - 1) | 0x80000000);
+    if (wordsCompare(sqrtY, sqrtX, n) >= 0) break;
+    memory.copy(sqrtX, sqrtY, <usize>n << 2);
+  }
+  memory.copy(out, sqrtX, <usize>n << 2);
+}
+
+/** -1, 0 or 1 when a < b, a == b or a > b (unsigned) */
+export function wordsCompare(a: usize, b: usize, n: i32): i32 {
+  for (let i = n - 1; i >= 0; --i) {
+    let x = getW(a, i), y = getW(b, i);
+    if (x != y) return x < y ? -1 : 1;
+  }
+  return 0;
+}
