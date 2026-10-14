@@ -1,7 +1,11 @@
 import { i128 } from './i128';
 import { u128 } from './u128';
 import { u256toDecimalString } from "../utils";
-import { __mul256, __u256divmod_qot_hi1, __u256divmod_qot_hi2, __u256divmod_qot_lo1, __u256divmod_qot_lo2, __u256divmod_rem_hi1, __u256divmod_rem_hi2, __u256divmod_rem_lo1, __u256divmod_rem_lo2, __udivrem, shl128, shl192, shl64, shr128, shr192, shr64 } from '../globals';
+import { __mul256 } from '../globals';
+import {
+  bufA, bufB, bufQ, bufR,
+  wordsDivRem,
+} from '../multiword';
 
 @lazy const HEX_CHARS = '0123456789abcdef';
 
@@ -11,8 +15,6 @@ export class u256 {
   @inline static get One():  u256 { return new u256(1); }
   @inline static get Min():  u256 { return new u256(); }
   @inline static get Max():  u256 { return new u256(-1, -1, -1, -1); }
-
-  // TODO: fromString
 
   @inline
   static fromU256(value: u256): u256 {
@@ -167,9 +169,6 @@ export class u256 {
     else throw new TypeError("Unsupported generic type");
   }
 
-  // TODO
-  // static fromString(str: string): u256
-
   constructor(
     public lo1: u64 = 0,
     public lo2: u64 = 0,
@@ -243,135 +242,87 @@ export class u256 {
     return value.isZero();
   }
 
-  static isU64(value: u256): bool {
-    return (value.lo2 | value.hi1 | value.hi2) == 0;
-  }
-
-  @inline @operator.prefix('~')
+  @operator.prefix('~')
   not(): u256 {
     return new u256(~this.lo1, ~this.lo2, ~this.hi1, ~this.hi2);
   }
 
-  @inline @operator.prefix('+')
+  @operator.prefix('+')
   pos(): u256 {
     return this;
   }
 
   @operator.prefix('-')
   neg(): u256 {
-    var
-      lo1 = ~this.lo1,
-      lo2 = ~this.lo2,
-      hi1 = ~this.hi1,
-      hi2 = ~this.hi2;
-
-    var lo1p = lo1 + 1;
-    var lo2p = lo2 + u64(lo1p < lo1);
-    var hi1p = hi1 + ((lo2 & ~lo2p) >> 63);
-    var hi2p = hi2 + ((hi1 & ~hi1p) >> 63);
-
-    return new u256(lo1p, lo2p, hi1p, hi2p);
+    return u256.sub(u256.Zero, this);
   }
 
   @operator.prefix('++')
   preInc(): this {
-    var
-      lo1 = this.lo1,
-      lo2 = this.lo2,
-      hi1 = this.hi1,
-      hi2 = this.hi2;
-
-    var lo1p = lo1 + 1;
-    var lo2p = lo2 + u64(lo1p < lo1);
-    var hi1p = hi1 + ((lo2 & ~lo2p) >> 63);
-    var hi2p = hi2 + ((hi1 & ~hi1p) >> 63);
-
-    this.lo1 = lo1p;
-    this.lo2 = lo2p;
-    this.hi1 = hi1p;
-    this.hi2 = hi2p;
-
+    var lo1 = this.lo1 + 1;
+    var c   = u64(lo1 == 0);
+    var lo2 = this.lo2 + c;
+        c  &= u64(lo2 == 0);
+    var hi1 = this.hi1 + c;
+        c  &= u64(hi1 == 0);
+    this.lo1 = lo1;
+    this.lo2 = lo2;
+    this.hi1 = hi1;
+    this.hi2 += c;
     return this;
   }
 
   @operator.prefix('--')
   preDec(): this {
-    var
-      lo1 = this.lo1,
-      lo2 = this.lo2,
-      hi1 = this.hi1,
-      hi2 = this.hi2;
-
-    var lo1p = lo1 - 1;
-    var lo2p = lo2 - u64(lo1p > lo1);
-    var hi1p = hi1 - ((~lo2 & lo2p) >> 63);
-    var hi2p = hi2 - ((~hi1 & hi1p) >> 63);
-
-    this.lo1 = lo1p;
-    this.lo2 = lo2p;
-    this.hi1 = hi1p;
-    this.hi2 = hi2p;
-
+    var b   = u64(this.lo1 == 0);
+    var lo2 = this.lo2;
+    var hi1 = this.hi1;
+    this.lo1 -= 1;
+    this.lo2  = lo2 - b;
+        b    &= u64(lo2 == 0);
+    this.hi1  = hi1 - b;
+        b    &= u64(hi1 == 0);
+    this.hi2 -= b;
     return this;
   }
 
-  @inline @operator.postfix('++')
+  @operator.postfix('++')
   postInc(): u256 {
     return this.clone().preInc();
   }
 
-  @inline @operator.postfix('--')
+  @operator.postfix('--')
   postDec(): u256 {
     return this.clone().preDec();
   }
 
   @operator('+')
   static add(a: u256, b: u256): u256 {
-    var
-      lo1a = a.lo1,
-      lo2a = a.lo2,
-      hi1a = a.hi1,
-      hi2a = a.hi2;
-
-    var
-      lo1b = b.lo1,
-      lo2b = b.lo2,
-      hi1b = b.hi1,
-      hi2b = b.hi2;
-
-    var lo1 = lo1a + lo1b;
-    var cy  = u64(lo1 < lo1a);
-    var lo2 = lo2a + lo2b + cy;
-        // for a + b + c case we should calculate carry bit differently
-        cy  = ((lo2a & lo2b) | ((lo2a | lo2b) & ~lo2)) >> 63;
-    var hi1 = hi1a + hi1b + cy;
-        cy  = ((hi1a & hi1b) | ((hi1a | hi1b) & ~hi1)) >> 63;
-    var hi2 = hi2a + hi2b + cy;
+    var lo1 = a.lo1 + b.lo1;
+    var cy  = u64(lo1 < a.lo1);
+    var t   = a.lo2 + cy;
+        cy  = u64(t < cy);
+    var lo2 = t + b.lo2;
+        cy |= u64(lo2 < t);
+        t   = a.hi1 + cy;
+        cy  = u64(t < cy);
+    var hi1 = t + b.hi1;
+        cy |= u64(hi1 < t);
+    var hi2 = a.hi2 + b.hi2 + cy;
     return new u256(lo1, lo2, hi1, hi2);
   }
 
   @operator('-')
   static sub(a: u256, b: u256): u256 {
-    var
-      lo1a = a.lo1,
-      lo2a = a.lo2,
-      hi1a = a.hi1,
-      hi2a = a.hi2;
-
-    var
-      lo1b = b.lo1,
-      lo2b = b.lo2,
-      hi1b = b.hi1,
-      hi2b = b.hi2;
-
-    var lo1 = lo1a - lo1b;
-    var cy  = u64(lo1 > lo1a);
-    var lo2 = lo2a - lo2b - cy;
-        // for a - b - c case we should calculate carry bit differently
-        cy  = ((~lo2a & lo2b) | ((~lo2a | lo2b) & lo2)) >> 63;
-    var hi1 = hi1a - hi1b - cy;
-        cy  = ((~hi1a & hi1b) | ((~hi1a | hi1b) & hi1)) >> 63;
-    var hi2 = hi2a - hi2b - cy;
+    var lo1 = a.lo1 - b.lo1;
+    var bw  = u64(a.lo1 < b.lo1);
+    var t   = a.lo2 - b.lo2;
+    var bw2 = u64(a.lo2 < b.lo2) | u64(t < bw);
+    var lo2 = t - bw;
+        t   = a.hi1 - b.hi1;
+        bw  = u64(a.hi1 < b.hi1) | u64(t < bw2);
+    var hi1 = t - bw2;
+    var hi2 = a.hi2 - b.hi2 - bw;
     return new u256(lo1, lo2, hi1, hi2);
   }
 
@@ -390,100 +341,50 @@ export class u256 {
     return new u256(a.lo1 & b.lo1, a.lo2 & b.lo2, a.hi1 & b.hi1, a.hi2 & b.hi2);
   }
 
-  @operator('>>')
-  static shr(value: u256, shift: i32): u256 {
-    shift &= 255;
-    if (shift % 64 == 0) {
-      switch (shift) {
-        case 0: return value;
-        case 64: return shr64(value);
-        case 128: return shr128(value);
-        case 192: return shr192(value);
-        default: new u256(0, 0, 0, 0);
-      }
-    }
-    var res = new u256();
-    var a: u64 = 0;
-    var b: u64 = 0;
-
-    if (shift > 192){
-      res = shr192(value);
-      shift -= 192;
-    }
-    else {
-      if (shift > 128){
-        res = shr128(res);
-        shift -= 128;
-      }
-      else {
-        if (shift > 64){
-          res = shr64(res);
-          shift -= 64;
-        }
-        else {
-          res = value;
-
-          // remaining shifts
-          a = res.hi2 << (64 - shift);
-          res.hi2 = res.hi2 >> shift;
-        }
-        b = res.hi1 << (64 - shift);
-        res.hi1 = (res.hi1 >> shift) | a;
-      }
-      a = res.lo2 << (64 - shift);
-      res.lo2 = (res.lo2 >> shift) | b;
-    }
-    res.lo1 = (res.lo1 >> shift) | a;
-
-    return res;
-  }
-
+  /**
+   * Shift left. Like Solidity, shifting by 256 bits or more (or by a negative amount)
+   * gives zero.
+   */
   @operator('<<')
   static shl(value: u256, shift: i32): u256 {
-    shift &= 255;
-    if (shift % 64 == 0) {
-      switch (shift) {
-        case 0: return value;
-        case 64: return shl64(value);
-        case 128: return shl128(value);
-        case 192: return shl192(value);
-        default: new u256(0, 0, 0, 0);
-      }
+    if (<u32>shift >= 256) return u256.Zero;
+    var a0 = value.lo1, a1 = value.lo2, a2 = value.hi1, a3 = value.hi2;
+    switch (shift >> 6) {
+      case 1: { a3 = a2; a2 = a1; a1 = a0; a0 = 0; break; }
+      case 2: { a3 = a1; a2 = a0; a1 = 0;  a0 = 0; break; }
+      case 3: { a3 = a0; a2 = 0;  a1 = 0;  a0 = 0; break; }
     }
-    var res = new u256();
-    var a: u64 = 0;
-    var b: u64 = 0;
-
-    if (shift > 192){
-      res = shl192(value);
-      shift -= 192;
+    var s = <u64>(shift & 63);
+    if (s) {
+      a3 = (a3 << s) | (a2 >> (64 - s));
+      a2 = (a2 << s) | (a1 >> (64 - s));
+      a1 = (a1 << s) | (a0 >> (64 - s));
+      a0 =  a0 << s;
     }
-    else {
-      if (shift > 128){
-        res = shl128(res);
-        shift -= 128;
-      }
-      else {
-        if (shift > 64){
-          res = shl64(res);
-          shift -= 64;
-        }
-        else {
-          res = value;
+    return new u256(a0, a1, a2, a3);
+  }
 
-          // remaining shifts
-          a = res.lo1 >> (64 - shift);
-          res.lo1 = res.lo1 << shift;
-        }
-        b = res.lo2 >> (64 - shift);
-        res.lo2 = (res.lo2 << shift) | a;
-      }
-      a = res.hi1 >> (64 - shift);
-      res.hi1 = (res.hi1 << shift) | b;
+  /**
+   * Logical shift right. Shifting by 256 bits or more (or by a negative amount)
+   * gives zero.
+   */
+  @operator('>>')
+  static shr(value: u256, shift: i32): u256 {
+    if (<u32>shift >= 256) return u256.Zero;
+    var a0 = value.lo1, a1 = value.lo2, a2 = value.hi1, a3 = value.hi2;
+    switch (shift >> 6) {
+      case 1: { a0 = a1; a1 = a2; a2 = a3; a3 = 0; break; }
+      case 2: { a0 = a2; a1 = a3; a2 = 0;  a3 = 0; break; }
+      case 3: { a0 = a3; a1 = 0;  a2 = 0;  a3 = 0; break; }
     }
-    res.hi2 = (res.hi2 << shift) | a;
-
-    return res;
+    var s = <u64>(shift & 63);
+    if (s) {
+      a0 = (a0 >> s) | (a1 << (64 - s));
+      a1 = (a1 >> s) | (a2 << (64 - s));
+      a2 = (a2 >> s) | (a3 << (64 - s));
+      a3 =  a3 >> s;
+    }
+    return new u256(a0, a1, a2, a3);
   }
 
   @inline @operator('>>>')
@@ -506,28 +407,23 @@ export class u256 {
 
   @operator('<')
   static lt(a: u256, b: u256): bool {
-    var ah2 = a.hi2, ah1 = a.hi1,
-        bh2 = b.hi2, bh1 = b.hi1,
-        al2 = a.lo2, bl2 = b.lo2;
-    if (ah2 == bh2) {
-      if (ah1 == bh1) {
-        return al2 == bl2 ? a.lo1 < b.lo1 : al2 < bl2
-      } else {
-        return ah1 < bh1;
-      }
-    } else {
-      return ah2 < bh2;
-    }
+    var ah2 = a.hi2, bh2 = b.hi2;
+    if (ah2 != bh2) return ah2 < bh2;
+    var ah1 = a.hi1, bh1 = b.hi1;
+    if (ah1 != bh1) return ah1 < bh1;
+    var al2 = a.lo2, bl2 = b.lo2;
+    if (al2 != bl2) return al2 < bl2;
+    return a.lo1 < b.lo1;
   }
 
   @inline @operator('>')
   static gt(a: u256, b: u256): bool {
-    return b < a;
+    return u256.lt(b, a);
   }
 
   @inline @operator('<=')
   static le(a: u256, b: u256): bool {
-    return !u256.gt(a, b);
+    return !u256.lt(b, a);
   }
 
   @inline @operator('>=')
@@ -535,81 +431,128 @@ export class u256 {
     return !u256.lt(a, b);
   }
 
-  // mul: u256 x u256 = u256
+  // mul: u256 x u256 = u256 (low 256 bits of the product)
   @inline @operator('*')
   static mul(a: u256, b: u256): u256 {
-    return __mul256(a.lo1, a.lo2, a.hi1, a.hi2, b.lo1, b.lo2, b.hi1, b.hi2)
+    return __mul256(a.lo1, a.lo2, a.hi1, a.hi2, b.lo1, b.lo2, b.hi1, b.hi2);
   }
 
-  // div return the quotient a/b = q with a,b,q u256 numbers
-  // If y == 0, return is 0 
-  @inline @operator('/')
+  /**
+   * Quotient, rounded down. Throws on division by zero.
+   */
+  @operator('/')
   static div(a: u256, b: u256): u256 {
-    if (b.isZero() || b > a) {
-      return u256.Zero
+    if ((b.lo2 | b.hi1 | b.hi2) == 0 && (a.lo2 | a.hi1 | a.hi2) == 0) {
+      let d = b.lo1;
+      if (d == 0) throw new RangeError("Division by zero");
+      return new u256(a.lo1 / d);
     }
-    if (a == b) {
-      return u256.One
-    }
-
-	  // Shortcut some cases
-    if (u256.isU64(a)) return u256.fromU64(a.toU64() / b.toU64());
-
-    // At this point, we know
-	  // a/b ; a > b > 0
-
-    __udivrem([a.lo1, a.lo2, a.hi1, a.hi2], [b.lo1, b.lo2, b.hi1, b.hi2]);
-
-    return new u256(__u256divmod_qot_lo1, __u256divmod_qot_lo2, __u256divmod_qot_hi1, __u256divmod_qot_hi2);
+    u256.divRemInto(a, b);
+    return u256.load(bufQ);
   }
 
-  // Mod return the modulus a%b.
-  // If y == 0, it returns 0 
-  @inline @operator('%')
+  /**
+   * Remainder of the division. Throws on division by zero.
+   */
+  @operator('%')
+  static rem(a: u256, b: u256): u256 {
+    if ((b.lo2 | b.hi1 | b.hi2) == 0 && (a.lo2 | a.hi1 | a.hi2) == 0) {
+      let d = b.lo1;
+      if (d == 0) throw new RangeError("Division by zero");
+      return new u256(a.lo1 % d);
+    }
+    u256.divRemInto(a, b);
+    return u256.load(bufR);
+  }
+
+  @inline
   static mod(a: u256, b: u256): u256 {
-    if (b.isZero() || a.isZero() || a == b) {
-      return u256.Zero
+    return u256.rem(a, b);
+  }
+
+  // quotient into bufQ, remainder into bufR
+  @inline
+  private static divRemInto(a: u256, b: u256): void {
+    a.store(bufA);
+    b.store(bufB);
+    wordsDivRem(bufA, 8, bufB, 8, bufQ, bufR);
+  }
+
+  /**
+   * Calculate power of base with exponent (wrapping on overflow).
+   * Negative exponents give zero (or one if `base` is one).
+   */
+  @operator('**')
+  static pow(base: u256, exponent: i32): u256 {
+    var result = u256.One;
+    if (u256.eq(base, result)) return result;
+    if (exponent < 0) return u256.Zero;
+    var tmp = base.clone();
+    while (exponent > 0) {
+      if (exponent & 1) result = u256.mul(result, tmp);
+      exponent >>= 1;
+      if (exponent) tmp = u256.mul(tmp, tmp);
     }
-    if (a < b) {
-      return a
-    }
-
-    // At this point:
-    // a != 0
-    // b != 0
-    // a > b
-
-     // Shortcut some cases
-     if (u256.isU64(a)) return u256.fromU64(a.toU64() % b.toU64());
-
-    __udivrem([a.lo1, a.lo2, a.hi1, a.hi2], [b.lo1, b.lo2, b.hi1, b.hi2])
-
-    return new u256(__u256divmod_rem_lo1, __u256divmod_rem_lo2, __u256divmod_rem_hi1, __u256divmod_rem_hi2);
+    return result;
   }
 
   @inline
   static popcnt(value: u256): i32 {
-    var count = popcnt(value.lo1);
-    if (value.lo2) count += popcnt(value.lo2);
-    if (value.hi1) count += popcnt(value.hi1);
-    if (value.hi2) count += popcnt(value.hi2);
-    return <i32>count;
+    return <i32>(
+      popcnt(value.lo1) + popcnt(value.lo2) +
+      popcnt(value.hi1) + popcnt(value.hi2)
+    );
   }
 
+  /**
+   * Count of leading zero bits (256 for zero)
+   */
   @inline
   static clz(value: u256): i32 {
-         if (value.hi2) return <i32>(clz(value.hi2) + 0);
-    else if (value.hi1) return <i32>(clz(value.hi1) + 64);
-    else if (value.lo2) return <i32>(clz(value.lo2) + 128);
-    else                return <i32>(clz(value.lo1) + 192);
+         if (value.hi2) return <i32>clz(value.hi2);
+    else if (value.hi1) return <i32>clz(value.hi1) + 64;
+    else if (value.lo2) return <i32>clz(value.lo2) + 128;
+    else                return <i32>clz(value.lo1) + 192;
   }
 
+  /**
+   * Count of trailing zero bits (256 for zero)
+   */
   @inline
   static ctz(value: u256): i32 {
-         if (value.lo1) return <i32>(ctz(value.lo1) + 0);
-    else if (value.lo2) return <i32>(ctz(value.lo2) + 64);
-    else if (value.hi1) return <i32>(ctz(value.hi1) + 128);
-    else                return <i32>(ctz(value.hi2) + 192);
+         if (value.lo1) return <i32>ctz(value.lo1);
+    else if (value.lo2) return <i32>ctz(value.lo2) + 64;
+    else if (value.hi1) return <i32>ctz(value.hi1) + 128;
+    else                return <i32>ctz(value.hi2) + 192;
+  }
+
+  /** Store the four 64-bit parts at `ptr` (little-endian, 32 bytes) */
+  @inline
+  store(ptr: usize): void {
+    store<u64>(ptr, this.lo1, 0);
+    store<u64>(ptr, this.lo2, 8);
+    store<u64>(ptr, this.hi1, 16);
+    store<u64>(ptr, this.hi2, 24);
+  }
+
+  /** Load from `ptr` (little-endian, 32 bytes) */
+  @inline
+  static load(ptr: usize): u256 {
+    return new u256(
+      load<u64>(ptr, 0),
+      load<u64>(ptr, 8),
+      load<u64>(ptr, 16),
+      load<u64>(ptr, 24),
+    );
+  }
+
+  /**
+   * Convert to 256-bit unsigned integer
+   * @returns 256-bit unsigned integer
+   */
+  @inline
+  toU256(): this {
+    return this;
   }
 
   /**
@@ -626,21 +569,12 @@ export class u256 {
   }
 
   /**
-   * Convert to 128-bit unsigned integer
+   * Convert to 128-bit unsigned integer (low 128 bits)
    * @return 128-bit unsigned integer
    */
   @inline
   toU128(): u128 {
     return new u128(this.lo1, this.lo2);
-  }
-
-  /**
-  * Convert to 256-bit unsigned integer
-  * @returns 256-bit unsigned integer
-  */
-  @inline
-  toU256(): this {
-    return this;
   }
 
   /**
@@ -656,7 +590,7 @@ export class u256 {
   }
 
   /**
-   * Convert to 64-bit unsigned integer
+   * Convert to 64-bit unsigned integer (low 64 bits)
    * @return 64-bit unsigned integer
    */
   @inline
@@ -674,7 +608,7 @@ export class u256 {
   }
 
   /**
-   * Convert to 32-bit unsigned integer
+   * Convert to 32-bit unsigned integer (low 32 bits)
    * @return 32-bit unsigned integer
    */
   @inline
@@ -762,12 +696,12 @@ export class u256 {
    * @param bigEndian Little or Big Endian? Default: false
    * @returns  StaticArray of bytes
    */
-   @inline
-   toStaticBytes(bigEndian: bool = false): StaticArray<u8> {
-     var result = new StaticArray<u8>(32);
-     this.toArrayBuffer(changetype<usize>(result), bigEndian);
-     return result;
-   }
+  @inline
+  toStaticBytes(bigEndian: bool = false): StaticArray<u8> {
+    var result = new StaticArray<u8>(32);
+    this.toArrayBuffer(changetype<usize>(result), bigEndian);
+    return result;
+  }
 
   /**
    * Convert to Uint8Array

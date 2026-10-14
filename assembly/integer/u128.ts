@@ -293,9 +293,13 @@ export class u128 {
     return new u128(a.lo & b.lo, a.hi & b.hi);
   }
 
+  /**
+   * Shift left. Like Solidity, shifting by 128 bits or more (or by a negative amount)
+   * gives zero.
+   */
   @inline @operator('<<')
   static shl(value: u128, shift: i32): u128 {
-    shift &= 127;
+    if (<u32>shift >= 128) return u128.Zero;
 
     // need for preventing redundant i32 -> u64 extends
     var shift64 = shift as u64;
@@ -314,9 +318,13 @@ export class u128 {
     return new u128(lo & mod2, hi);
   }
 
+  /**
+   * Logical shift right. Shifting by 128 bits or more (or by a negative amount)
+   * gives zero.
+   */
   @inline @operator('>>')
   static shr(value: u128, shift: i32): u128 {
-    shift &= 127;
+    if (<u32>shift >= 128) return u128.Zero;
 
     // need for preventing redundant i32 -> u64 extends
     var shift64 = shift as u64;

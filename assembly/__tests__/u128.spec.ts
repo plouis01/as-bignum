@@ -528,9 +528,11 @@ describe("Basic Operations", () => {
     expect(a << 65).toStrictEqual(new u128(0, 2));
   });
 
-  it("Should periodic left shift one number", () => {
+  it("Should give zero when shifting left by 128 bits or more", () => {
     var a = new u128(1, 0);
-    expect(a << (65 + 128)).toStrictEqual(new u128(0, 2));
+    expect(a << 128).toStrictEqual(u128.Zero);
+    expect(a << (65 + 128)).toStrictEqual(u128.Zero);
+    expect(a << -1).toStrictEqual(u128.Zero);
   });
 
   it("Should invariant left shift zero number", () => {
@@ -543,9 +545,11 @@ describe("Basic Operations", () => {
     expect(a >> 65).toStrictEqual(new u128(50));
   });
 
-  it("Should periodic right shift one number", () => {
+  it("Should give zero when shifting right by 128 bits or more", () => {
     var a = new u128(0, 100);
-    expect(a >> (65 + 128)).toStrictEqual(new u128(50));
+    expect(a >> 128).toStrictEqual(u128.Zero);
+    expect(a >> (65 + 128)).toStrictEqual(u128.Zero);
+    expect(a >> -1).toStrictEqual(u128.Zero);
   });
 
   it("Should invariant right shift zero number", () => {
