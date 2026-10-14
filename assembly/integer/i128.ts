@@ -17,6 +17,20 @@ import {
 
 import { atou128 } from '../utils';
 
+// Signed operations reuse the unsigned ones: in two's complement, addition, subtraction,
+// multiplication and the bitwise operations give the same bits for signed and unsigned
+// numbers. `asU` reads an i128 as an u128 (same memory layout) without copying.
+
+// @ts-ignore: decorator
+@inline function asU(value: i128): u128 {
+  return changetype<u128>(value);
+}
+
+// @ts-ignore: decorator
+@inline function fromU(value: u128): i128 {
+  return new i128(value.lo, value.hi);
+}
+
 export class i128 {
 
   @inline static get Zero(): i128 { return new i128(); }
@@ -213,7 +227,7 @@ export class i128 {
   }
 
   @inline @operator('^')
-  static xor(a: i128, b: u128): i128 {
+  static xor(a: i128, b: i128): i128 {
     return new i128(a.lo ^ b.lo, a.hi ^ b.hi);
   }
 
@@ -222,72 +236,48 @@ export class i128 {
     return new i128(a.lo & b.lo, a.hi & b.hi);
   }
 
+  /**
+   * Shift left. Shifting by 128 bits or more (or by a negative amount) gives zero.
+   */
   @inline @operator('<<')
   static shl(value: i128, shift: i32): i128 {
-    shift &= 127;
-
-    // need for preventing redundant i32 -> u64 extends
-    var shift64: i64 = shift;
-
-    var mod1: i64 = ((((shift64 + 127) | shift64) & 64) >>> 6) - 1;
-    var mod2: i64 = (shift64 >>> 6) - 1;
-
-    shift64 &= 63;
-
-    var vl = value.lo;
-    var lo = vl << shift64;
-    var hi = lo & ~mod2;
-
-    hi |= ((value.hi << shift64) | ((vl >>> (64 - shift64)) & mod1)) & mod2;
-
-    return new i128(lo & mod2, hi);
+    return fromU(u128.shl(asU(value), shift));
   }
 
+  /**
+   * Arithmetic shift right (rounds toward negative infinity, like Solidity).
+   * Shifting by 128 bits or more gives 0 for positive values and -1 for negative ones.
+   */
+  @operator('>>')
+  static shr(value: i128, shift: i32): i128 {
+    if (value.isNeg()) {
+      // ~(~x >>> s) fills with ones
+      return fromU(u128.shr(asU(value).not(), shift).not());
+    }
+    return fromU(u128.shr(asU(value), shift));
+  }
+
+  /**
+   * Logical shift right (fills with zeros)
+   */
   @inline @operator('>>>')
   static shr_u(value: i128, shift: i32): i128 {
-    shift &= 127;
-
-    // need for preventing redundant i32 -> u64 extends
-    var shift64: i64 = shift;
-
-    var mod1: i64 = ((((shift64 + 127) | shift64) & 64) >>> 6) - 1;
-    var mod2: i64 = (shift64 >>> 6) - 1;
-
-    shift64 &= 63;
-
-    var vh = value.hi;
-    var hi = vh >>> shift64;
-    var lo = hi & ~mod2;
-
-    lo |= ((value.lo >>> shift64) | ((vh << (64 - shift64)) & mod1)) & mod2;
-
-    return new i128(lo, hi & mod2);
+    return fromU(u128.shr(asU(value), shift));
   }
 
   @inline @operator('+')
   static add(a: i128, b: i128): i128 {
-    var blo = b.lo;
-    var bhi = b.hi;
-    var lo = a.lo + blo - (bhi >>> 63);
-    var hi = a.hi + bhi + i64(lo < blo);
-    return new i128(lo, hi);
+    return fromU(u128.add(asU(a), asU(b)));
   }
 
   @inline @operator('-')
   static sub(a: i128, b: i128): i128 {
-    var alo = a.lo;
-    var bhi = b.hi;
-    var lo = alo  - b.lo + (bhi >>> 63);
-    var hi = a.hi - bhi  - i64(lo > alo);
-    return new i128(lo, hi);
+    return fromU(u128.sub(asU(a), asU(b)));
   }
 
   @inline @operator('*')
   static mul(a: i128, b: i128): i128 {
-    return new i128(
-      __multi3(a.lo, a.hi, b.lo, b.hi),
-      __res128_hi
-    );
+    return fromU(u128.mul(asU(a), asU(b)));
   }
 
   @inline @operator('/')

@@ -96,9 +96,11 @@ describe("Basic Operations", () => {
     expect(a << 65).toStrictEqual(new i128(0, 2));
   });
 
-  it("Should periodic left shift one number", () => {
+  it("Should give zero when shifting left by 128 bits or more", () => {
     var a = new i128(1, 0);
-    expect(a << (65 + 128)).toStrictEqual(new i128(0, 2));
+    expect(a << 128).toStrictEqual(i128.Zero);
+    expect(a << (65 + 128)).toStrictEqual(i128.Zero);
+    expect(a << -1).toStrictEqual(i128.Zero);
   });
 
   it("Should invariant left shift zero number", () => {
