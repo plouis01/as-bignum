@@ -318,6 +318,53 @@ export class fp128<Q> {
     return r;
   }
 
+  @inline
+  private fractMask(): i128 {
+    return i128.sub(i128.shl(i128.One, fractBitsOf<Q>()), i128.One);
+  }
+
+  /** Largest integer not greater than the value */
+  floor(): fp128<Q> {
+    var r = new fp128<Q>(i128.and(this.value, this.fractMask().not()));
+    setFixedOverflow(false);
+    return r;
+  }
+
+  /** Smallest integer not less than the value (wraps near Max) */
+  ceil(): fp128<Q> {
+    var mask = this.fractMask();
+    if (i128.and(this.value, mask).isZero()) {
+      setFixedOverflow(false);
+      return this.clone();
+    }
+    var r = i128.add(i128.and(this.value, mask.not()), i128.add(mask, i128.One));
+    setFixedOverflow(!this.isNeg() && r.isNeg());
+    return new fp128<Q>(r);
+  }
+
+  /** Integer part, rounded toward zero */
+  trunc(): fp128<Q> {
+    return this.isNeg() ? this.ceil() : this.floor();
+  }
+
+  /** Nearest integer, halfway cases rounded away from zero (wraps near Min / Max) */
+  round(): fp128<Q> {
+    var half = i128.shl(i128.One, fractBitsOf<Q>() - 1);
+    var neg = this.isNeg();
+    var r = neg ? i128.sub(this.value, half) : i128.add(this.value, half);
+    var overflow = r.isNeg() != neg;
+    var t = new fp128<Q>(r).trunc();
+    setFixedOverflow(overflow);
+    return t;
+  }
+
+  /** Fractional part, with the sign of the value: this - trunc(this) */
+  frac(): fp128<Q> {
+    var r = new fp128<Q>(i128.sub(this.value, this.trunc().value));
+    setFixedOverflow(false);
+    return r;
+  }
+
   /** Integer part, rounded toward zero */
   toI128(): i128 {
     var r = new i128();
