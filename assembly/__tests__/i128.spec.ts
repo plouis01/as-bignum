@@ -258,11 +258,15 @@ describe("Division And Mod Operation", () => {
 
 describe("Throwable", () => {
   // TODO: tests
-  it("Should throw Division", () => {
+  it("Should throw on division by zero", () => {
     expect(() => {
-      let b = i128.Min;
-      let c = i128.NegOne;
-      i128.div(b,c);
+      i128.div(i128.One, i128.Zero);
+    }).toThrow();
+  });
+
+  it("Should throw on remainder by zero", () => {
+    expect(() => {
+      i128.rem(i128.One, i128.Zero);
     }).toThrow();
   });
 });
