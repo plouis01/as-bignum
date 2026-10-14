@@ -616,6 +616,16 @@ export class u128 {
     return i32(u128.gt(a, b)) - i32(u128.lt(a, b));
   }
 
+  @inline
+  static min(a: u128, b: u128): u128 {
+    return u128.lt(b, a) ? b.clone() : a.clone();
+  }
+
+  @inline
+  static max(a: u128, b: u128): u128 {
+    return u128.lt(a, b) ? b.clone() : a.clone();
+  }
+
   /**
    * Compute count of set (populated) bits
    * @param  value 128-bit unsigned integer

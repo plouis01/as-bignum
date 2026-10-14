@@ -392,6 +392,20 @@ export class u256 {
     return u256.shr(value, shift);
   }
 
+  @inline
+  static rotl(value: u256, shift: i32): u256 {
+    var n = shift & 255;
+    if (n == 0) return value.clone();
+    return u256.or(u256.shl(value, n), u256.shr(value, 256 - n));
+  }
+
+  @inline
+  static rotr(value: u256, shift: i32): u256 {
+    var n = shift & 255;
+    if (n == 0) return value.clone();
+    return u256.or(u256.shr(value, n), u256.shl(value, 256 - n));
+  }
+
   @inline @operator('==')
   static eq(a: u256, b: u256): bool {
     return (
@@ -429,6 +443,27 @@ export class u256 {
   @inline @operator('>=')
   static ge(a: u256, b: u256): bool {
     return !u256.lt(a, b);
+  }
+
+  /**
+   * Get ordering
+   * if a > b then result is  1
+   * if a < b then result is -1
+   * if a = b then result is  0
+   */
+  @inline
+  static ord(a: u256, b: u256): i32 {
+    return i32(u256.lt(b, a)) - i32(u256.lt(a, b));
+  }
+
+  @inline
+  static min(a: u256, b: u256): u256 {
+    return u256.lt(b, a) ? b.clone() : a.clone();
+  }
+
+  @inline
+  static max(a: u256, b: u256): u256 {
+    return u256.lt(a, b) ? b.clone() : a.clone();
   }
 
   // mul: u256 x u256 = u256 (low 256 bits of the product)
