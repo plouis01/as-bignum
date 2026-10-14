@@ -19,14 +19,12 @@ import {
   __divmod_rem_hi,
 } from '../globals';
 
-import { atou128, u128toDecimalString } from '../utils';
+import { atou128 } from '../utils';
 import {
   bufA, bufB, bufQ, bufR, bufP,
-  wordsMul, wordsDivRem, wordsZeroFrom,
+  wordsMul, wordsDivRem, wordsZeroFrom, wordsToString,
 } from '../multiword';
 import { __floatFromWords, __wordsFromFloat } from '../globals';
-
-@lazy const HEX_CHARS = '0123456789abcdef';
 
 export class u128 {
 
@@ -959,20 +957,12 @@ export class u128 {
     return new u128(this.lo, this.hi);
   }
 
+  /**
+   * Format in base `radix` (2 to 36), lowercase, without prefix
+   */
   toString(radix: i32 = 10): string {
-    assert(radix == 10 || radix == 16, 'radix argument must be between 10 or 16');
-    if (this.isZero()) return '0';
-
-    var result = '';
-    if (radix == 16) {
-      let shift: i32 = 124 - (u128.clz(this) & ~3);
-      while (shift >= 0) {
-        // @ts-ignore
-        result += HEX_CHARS.charAt(<i32>((this >> shift).lo & 15));
-        shift  -= 4;
-      }
-      return result;
-    }
-    return u128toDecimalString(this);
+    store<u64>(bufA, this.lo);
+    store<u64>(bufA, this.hi, 8);
+    return wordsToString(bufA, 4, radix);
   }
 }

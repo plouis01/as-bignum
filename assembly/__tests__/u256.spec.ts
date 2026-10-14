@@ -704,4 +704,10 @@ describe("Throwable", () => {
       !(u256.muldiv(u256.Max, u256.Max, u256.One));
     }).toThrow();
   });
+
+  it("Should throw from string with unsupported radix", () => {
+    expect(() => {
+      !(u256.fromString('1234', 37));
+    }).toThrow();
+  });
 });

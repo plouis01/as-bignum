@@ -1,13 +1,10 @@
 import { i128 } from './i128';
 import { u128 } from './u128';
-import { u256toDecimalString } from "../utils";
 import { __mul256, __floatFromWords, __wordsFromFloat } from '../globals';
 import {
   bufA, bufB, bufQ, bufR, bufP,
-  wordsMul, wordsDivRem, wordsZeroFrom,
+  wordsMul, wordsDivRem, wordsZeroFrom, wordsToString, wordsFromString,
 } from '../multiword';
-
-@lazy const HEX_CHARS = '0123456789abcdef';
 
 export class u256 {
 
@@ -15,6 +12,16 @@ export class u256 {
   @inline static get One():  u256 { return new u256(1); }
   @inline static get Min():  u256 { return new u256(); }
   @inline static get Max():  u256 { return new u256(-1, -1, -1, -1); }
+
+  /**
+   * Parse a string. Accepts an optional sign and a `0x`, `0o` or `0b` prefix, and stops
+   * at the first invalid character. Values that don't fit wrap around (keep the low
+   * 256 bits), and a negative value gives its two's complement.
+   */
+  static fromString(value: string, radix: i32 = 10): u256 {
+    wordsFromString(value, radix, bufA, 8);
+    return u256.load(bufA);
+  }
 
   @inline
   static fromU256(value: u256): u256 {
@@ -177,6 +184,7 @@ export class u256 {
     else if (value instanceof u256)       return u256.fromU256(<u256>value);
     else if (value instanceof u8[])       return u256.fromBytes(<u8[]>value);
     else if (value instanceof Uint8Array) return u256.fromBytes(<Uint8Array>value);
+    else if (value instanceof String)     return u256.fromString(<string>value);
     else throw new TypeError("Unsupported generic type");
   }
 
@@ -864,20 +872,11 @@ export class u256 {
     return new u256(this.lo1, this.lo2, this.hi1, this.hi2);
   }
 
+  /**
+   * Format in base `radix` (2 to 36), lowercase, without prefix
+   */
   toString(radix: i32 = 10): string {
-    assert(radix == 10 || radix == 16, 'radix argument must be between 10 or 16');
-    if (this.isZero()) return '0';
-
-    var result = '';
-    if (radix == 16) {
-      let shift: i32 = 252 - (u256.clz(this) & ~3);
-      while (shift >= 0) {
-        // @ts-ignore
-        result += HEX_CHARS.charAt(<i32>((this >> shift).lo1 & 15));
-        shift -= 4;
-      }
-      return result;
-    }
-    return u256toDecimalString(this);
+    this.store(bufA);
+    return wordsToString(bufA, 8, radix);
   }
 }

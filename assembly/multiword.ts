@@ -1,3 +1,5 @@
+import { CharCode } from "util/string";
+
 // Arithmetic on little-endian arrays of 32-bit digits stored in linear memory.
 //
 // Shared by u128, u256 and their signed and fixed point versions: a u128 is 4 digits,
@@ -176,6 +178,34 @@ export function wordsDivRem(u: usize, m: i32, v: usize, n: i32, q: usize, r: usi
   setW(r, nn - 1, getW(un, nn - 1) >> s);
 }
 
+/**
+ * ptr[0..n) = ptr[0..n) * mul + add, returns the carry out (non zero on overflow).
+ */
+export function wordsMulAddSmall(ptr: usize, n: i32, mul: u32, add: u32): u32 {
+  var k = <u64>add;
+  for (let i = 0; i < n; ++i) {
+    let t = <u64>getW(ptr, i) * <u64>mul + k;
+    setW(ptr, i, <u32>t);
+    k = t >> 32;
+  }
+  return <u32>k;
+}
+
+/**
+ * ptr[0..n) = ptr[0..n) / div (in place), returns the remainder.
+ */
+export function wordsDivSmall(ptr: usize, n: i32, div: u32): u32 {
+  var d = <u64>div;
+  var k: u64 = 0;
+  for (let j = n - 1; j >= 0; --j) {
+    let t = (k << 32) | <u64>getW(ptr, j);
+    let qj = t / d;
+    setW(ptr, j, <u32>qj);
+    k = t - qj * d;
+  }
+  return <u32>k;
+}
+
 /** ptr[0..n) = -ptr[0..n) (two's complement, in place) */
 export function wordsNeg(ptr: usize, n: i32): void {
   var c: u64 = 1;
@@ -184,4 +214,88 @@ export function wordsNeg(ptr: usize, n: i32): void {
     setW(ptr, i, <u32>t);
     c = t >> 32;
   }
+}
+
+// @ts-ignore: decorator
+@lazy const DIGITS = "0123456789abcdefghijklmnopqrstuvwxyz";
+
+/**
+ * Format the unsigned number `ptr[0..n)` in base `radix` (2 to 36).
+ * Destroys the content of `ptr`.
+ */
+export function wordsToString(ptr: usize, n: i32, radix: i32): string {
+  if (radix < 2 || radix > 36) throw new RangeError("radix argument must be between 2 and 36");
+  n = wordsLength(ptr, n);
+  if (n == 0) return "0";
+
+  // largest power of radix that fits in a digit, to convert 32 bits at a time
+  var chunk = <u32>radix;
+  var chunkDigits = 1;
+  while (<u64>chunk * <u64>radix <= <u64>u32.MAX_VALUE) {
+    chunk *= <u32>radix;
+    ++chunkDigits;
+  }
+
+  // at most 512 bits => at most 512 characters (radix 2)
+  var out = new StaticArray<u16>(n * 32);
+  var pos = out.length;
+  while (n > 0) {
+    let rem = wordsDivSmall(ptr, n, chunk);
+    n = wordsLength(ptr, n);
+    for (let i = 0; i < chunkDigits; ++i) {
+      unchecked(out[--pos] = <u16>DIGITS.charCodeAt(<i32>(rem % <u32>radix)));
+      rem /= <u32>radix;
+      // no leading zeros on the most significant chunk
+      if (n == 0 && rem == 0) break;
+    }
+  }
+  return String.UTF16.decodeUnsafe(
+    changetype<usize>(out) + (<usize>pos << 1),
+    <usize>(out.length - pos) << 1
+  );
+}
+
+// @ts-ignore: decorator
+@inline function digitValue(code: i32): i32 {
+  if (code >= CharCode._0 && code <= CharCode._9) return code - CharCode._0;
+  var lower = code | 32;
+  if (lower >= CharCode.a && lower <= CharCode.z) return lower - CharCode.a + 10;
+  return 99;
+}
+
+/**
+ * Parse `str` into `ptr[0..n)`, keeping the low `n * 32` bits (wrapping on overflow).
+ * Accepts an optional sign and a `0x`, `0o` or `0b` prefix (which overrides `radix`),
+ * stops at the first character that is not a digit of the radix.
+ * Returns true if the number was negative (the result is then already negated).
+ */
+export function wordsFromString(str: string, radix: i32, ptr: usize, n: i32): bool {
+  if (radix < 2 || radix > 36) throw new RangeError("Invalid radix");
+  wordsClear(ptr, n);
+  var len = str.length;
+  if (!len) return false;
+
+  var index = 0;
+  var first = str.charCodeAt(0);
+  var isNeg = first == CharCode.MINUS;
+  if (isNeg || first == CharCode.PLUS) ++index;
+
+  if (index + 1 < len && str.charCodeAt(index) == CharCode._0) {
+    let second = str.charCodeAt(index + 1) | 32;
+    if (second == CharCode.x) {
+      radix = 16; index += 2;
+    } else if (second == CharCode.o) {
+      radix = 8; index += 2;
+    } else if (second == CharCode.b) {
+      radix = 2; index += 2;
+    }
+  }
+
+  for (; index < len; ++index) {
+    let d = digitValue(str.charCodeAt(index));
+    if (d >= radix) break;
+    wordsMulAddSmall(ptr, n, <u32>radix, <u32>d);
+  }
+  if (isNeg) wordsNeg(ptr, n);
+  return isNeg;
 }
