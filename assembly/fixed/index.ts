@@ -1,21 +1,27 @@
-import { u128  } from "../integer/u128";
 import { fp128 } from "./fp128";
 import { fp256 } from "./fp256";
+import { u128 } from "../integer/u128";
 import {
-  u24, u40, u48, u56, u72, u80, u88, u96,
-  u104, u112, u120, u136, u144, u152, u160,
+  u24, u40, u48, u56, u72, u80, u88, u96, u104, u112, u120,
+  u136, u144, u152, u160, u168, u176, u184, u192,
 } from './types';
 
-export type fp128x8  = fp128<u8>;
-export type fp128x16 = fp128<u16>;
-export type fp128x24 = fp128<u24>;
-export type fp128x32 = fp128<u32>;
-export type fp128x40 = fp128<u40>;
-export type fp128x48 = fp128<u48>;
-export type fp128x56 = fp128<u56>;
-export type fp128x64 = fp128<u64>;
-export type fp128x72 = fp128<u72>;
-export type fp128x80 = fp128<u80>;
+// fpNNNxF: NNN bits in total, F fractional bits
+export type fp128x8   = fp128<u8>;
+export type fp128x16  = fp128<u16>;
+export type fp128x24  = fp128<u24>;
+export type fp128x32  = fp128<u32>;
+export type fp128x40  = fp128<u40>;
+export type fp128x48  = fp128<u48>;
+export type fp128x56  = fp128<u56>;
+export type fp128x64  = fp128<u64>;
+export type fp128x72  = fp128<u72>;
+export type fp128x80  = fp128<u80>;
+export type fp128x88  = fp128<u88>;
+export type fp128x96  = fp128<u96>;
+export type fp128x104 = fp128<u104>;
+export type fp128x112 = fp128<u112>;
+export type fp128x120 = fp128<u120>;
 
 export type fp256x8   = fp256<u8>;
 export type fp256x16  = fp256<u16>;
@@ -37,5 +43,10 @@ export type fp256x136 = fp256<u136>;
 export type fp256x144 = fp256<u144>;
 export type fp256x152 = fp256<u152>;
 export type fp256x160 = fp256<u160>;
+export type fp256x168 = fp256<u168>;
+export type fp256x176 = fp256<u176>;
+export type fp256x184 = fp256<u184>;
+export type fp256x192 = fp256<u192>;
 
 export { fp128, fp256 };
+export * from "./types";
