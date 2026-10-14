@@ -1,58 +1,306 @@
 import { i128 } from '../integer/i128';
 import { u128 } from '../integer/u128';
+import {
+  fixedMul, fixedDiv, fixedFromInt, fixedTrunc,
+  setFixedOverflow, fractBitsOf,
+} from './core';
 
-// Support only this fractions:
-// fp128<u8>   =>   8 bits (~ 2  decimal digits)
-// fp128<u16>  =>  16 bits (~ 4  decimal digits)
-// fp128<u24>  =>  24 bits (~ 7  decimal digits)
-// fp128<u32>  =>  32 bits (~ 9  decimal digits)
-// fp128<u40>  =>  40 bits (~ 12 decimal digits)
-// fp128<u48>  =>  48 bits (~ 14 decimal digits)
-// fp128<u56>  =>  56 bits (~ 16 decimal digits)
-// fp128<u64>  =>  64 bits (~ 19 decimal digits)
-// fp128<u72>  =>  72 bits (~ 21 decimal digits)
-// fp128<u80>  =>  80 bits (~ 24 decimal digits)
-// fp128<u88>  =>  88 bits (~ 26 decimal digits)
-// fp128<u96>  =>  96 bits (~ 28 decimal digits)
-// fp128<u104> => 104 bits (~ 31 decimal digits)
-// fp128<u112> => 112 bits (~ 33 decimal digits)
-// fp128<u120> => 120 bits (~ 36 decimal digits)
+// Number of 32-bit digits of the raw value
+// @ts-ignore: decorator
+@lazy const N = 4;
+// @ts-ignore: decorator
+@lazy const BITS = 128;
 
+// @ts-ignore: decorator
+@inline function ptr(value: i128): usize {
+  return changetype<usize>(value);
+}
+
+/**
+ * Signed fixed point number on 128 bits. `Q` gives the number of fractional bits (a tag
+ * type from `types.ts`, or u8 / u16 / u32 / u64), so `fp128<u64>` is a Q63.64 number.
+ * The raw value `value` stands for `value / 2^fractBits`.
+ *
+ * Like the integer types, operations wrap around on overflow (the `safe` version
+ * throws). Multiplication, division, conversions and parsing round toward zero.
+ * Division by zero throws.
+ *
+ * Static functions take the tag as a type argument: `fp128.fromString<u64>("1.5")`,
+ * `fp128.One<u64>()`.
+ */
 export class fp128<Q> {
 
-  static readonly Zero: fp128<Q> = new fp128<Q>(0);
-  static readonly One:  fp128<Q> = new fp128<Q>(1);
-
-  protected value: i128 = i128.Zero;
-
-  constructor(lo: u64 = 0, hi: i64 = 0) {
-    this.value.lo = lo;
-    this.value.hi = hi;
+  /** Number of fractional bits */
+  @inline
+  static fractBits<Q>(): i32 {
+    return fractBitsOf<Q>();
   }
 
+  /** Number of integer bits, including the sign bit */
   @inline
-  get intBits(): i32 {
-    return 128 - this.fractBits;
+  static intBits<Q>(): i32 {
+    return BITS - fractBitsOf<Q>();
   }
 
-  @inline
-  get fractBits(): i32 {
-    if (isReference<Q>()) {
-      return 8 * offsetof<Q>();
-    } else {
-      return 8 * sizeof<Q>();
+  @inline static Zero<Q>(): fp128<Q> { return new fp128<Q>(); }
+  @inline static One<Q>():  fp128<Q> { return new fp128<Q>(i128.shl(i128.One, fractBitsOf<Q>())); }
+  @inline static Min<Q>():  fp128<Q> { return new fp128<Q>(i128.Min); }
+  @inline static Max<Q>():  fp128<Q> { return new fp128<Q>(i128.Max); }
+  /** Smallest positive value, 2^-fractBits */
+  @inline static Epsilon<Q>(): fp128<Q> { return new fp128<Q>(i128.One); }
+
+  /**
+   * @param value raw value: the number times 2^fractBits
+   */
+  constructor(public value: i128 = new i128()) {
+    if (fractBitsOf<Q>() < 1 || fractBitsOf<Q>() > BITS - 2) {
+      ERROR("fp128<Q>: Q must give between 1 and 126 fractional bits");
     }
   }
 
+  /** Create from the raw value (the number times 2^fractBits) */
   @inline
-  get int(): i128 {
-    return this.value >>> this.fractBits;
+  static fromRaw<Q>(value: i128): fp128<Q> {
+    return new fp128<Q>(value.clone());
+  }
+
+  /** Create from an integer */
+  static fromI128<Q>(value: i128): fp128<Q> {
+    var r = new i128();
+    fixedFromInt(ptr(value), N, fractBitsOf<Q>(), ptr(r));
+    return new fp128<Q>(r);
+  }
+
+  /** Create from an unsigned integer */
+  static fromU128<Q>(value: u128): fp128<Q> {
+    var r = fp128.fromI128<Q>(value.toI128());
+    // 2^127 or more: never fits
+    if (value.hi >>> 63) setFixedOverflow(true);
+    return r;
   }
 
   @inline
-  get fract(): u128 {
-    return (chagetype<u128>(this.value)) << this.intBits;
+  static fromI64<Q>(value: i64): fp128<Q> {
+    return fp128.fromI128<Q>(i128.fromI64(value));
   }
 
-  // TODO
+  @inline
+  static fromU64<Q>(value: u64): fp128<Q> {
+    return fp128.fromI128<Q>(i128.fromU64(value));
+  }
+
+  @inline
+  static fromI32<Q>(value: i32): fp128<Q> {
+    return fp128.fromI128<Q>(i128.fromI32(value));
+  }
+
+  @inline
+  static fromU32<Q>(value: u32): fp128<Q> {
+    return fp128.fromI128<Q>(i128.fromU32(value));
+  }
+
+  /**
+   * Create from a float, rounded toward zero. Throws on NaN and infinity.
+   */
+  static fromF64<Q>(value: f64): fp128<Q> {
+    // exact scaling by 2^F
+    var scaled = value * reinterpret<f64>(<u64>(fractBitsOf<Q>() + 1023) << 52);
+    var limit = reinterpret<f64>(<u64>(BITS - 1 + 1023) << 52); // 2^127
+    var r = new fp128<Q>(i128.fromF64(scaled));
+    setFixedOverflow(scaled >= limit || scaled < -limit);
+    return r;
+  }
+
+  @inline
+  static fromF32<Q>(value: f32): fp128<Q> {
+    return fp128.fromF64<Q>(<f64>value);
+  }
+
+  @inline
+  static from<Q, T>(value: T): fp128<Q> {
+         if (value instanceof bool)   return fp128.fromU64<Q>(<u64>value);
+    else if (value instanceof i8)     return fp128.fromI64<Q>(<i64>value);
+    else if (value instanceof u8)     return fp128.fromU64<Q>(<u64>value);
+    else if (value instanceof i16)    return fp128.fromI64<Q>(<i64>value);
+    else if (value instanceof u16)    return fp128.fromU64<Q>(<u64>value);
+    else if (value instanceof i32)    return fp128.fromI64<Q>(<i64>value);
+    else if (value instanceof u32)    return fp128.fromU64<Q>(<u64>value);
+    else if (value instanceof i64)    return fp128.fromI64<Q>(<i64>value);
+    else if (value instanceof u64)    return fp128.fromU64<Q>(<u64>value);
+    else if (value instanceof f32)    return fp128.fromF64<Q>(<f64>value);
+    else if (value instanceof f64)    return fp128.fromF64<Q>(<f64>value);
+    else if (value instanceof i128)   return fp128.fromI128<Q>(<i128>value);
+    else if (value instanceof u128)   return fp128.fromU128<Q>(<u128>value);
+    else throw new TypeError("Unsupported generic type");
+  }
+
+  /** Number of fractional bits */
+  @inline
+  get fractBits(): i32 {
+    return fractBitsOf<Q>();
+  }
+
+  @inline
+  isZero(): bool {
+    return this.value.isZero();
+  }
+
+  @inline
+  isNeg(): bool {
+    return this.value.isNeg();
+  }
+
+  @operator.prefix('!')
+  isEmpty(): bool {
+    return this.value.isZero();
+  }
+
+  @operator.prefix('+')
+  pos(): fp128<Q> {
+    return this;
+  }
+
+  @operator.prefix('-')
+  neg(): fp128<Q> {
+    var r = new fp128<Q>(this.value.neg());
+    setFixedOverflow(i128.eq(this.value, i128.Min));
+    return r;
+  }
+
+  @operator('+')
+  add(b: fp128<Q>): fp128<Q> {
+    var a = this.value;
+    var r = i128.add(a, b.value);
+    setFixedOverflow(a.isNeg() == b.isNeg() && r.isNeg() != a.isNeg());
+    return new fp128<Q>(r);
+  }
+
+  @operator('-')
+  sub(b: fp128<Q>): fp128<Q> {
+    var a = this.value;
+    var r = i128.sub(a, b.value);
+    setFixedOverflow(a.isNeg() != b.isNeg() && r.isNeg() != a.isNeg());
+    return new fp128<Q>(r);
+  }
+
+  @operator('*')
+  mul(b: fp128<Q>): fp128<Q> {
+    var r = new i128();
+    fixedMul(ptr(this.value), ptr(b.value), N, fractBitsOf<Q>(), ptr(r));
+    return new fp128<Q>(r);
+  }
+
+  /**
+   * Quotient rounded toward zero. Throws on division by zero.
+   */
+  @operator('/')
+  div(b: fp128<Q>): fp128<Q> {
+    var r = new i128();
+    fixedDiv(ptr(this.value), ptr(b.value), N, fractBitsOf<Q>(), ptr(r));
+    return new fp128<Q>(r);
+  }
+
+  /**
+   * Remainder of the division (exact), with the sign of the dividend.
+   * Throws on division by zero.
+   */
+  @operator('%')
+  rem(b: fp128<Q>): fp128<Q> {
+    var r = new fp128<Q>(i128.rem(this.value, b.value));
+    setFixedOverflow(false);
+    return r;
+  }
+
+  @operator('==')
+  eq(b: fp128<Q>): bool {
+    return i128.eq(this.value, b.value);
+  }
+
+  @operator('!=')
+  ne(b: fp128<Q>): bool {
+    return !i128.eq(this.value, b.value);
+  }
+
+  @operator('<')
+  lt(b: fp128<Q>): bool {
+    return i128.lt(this.value, b.value);
+  }
+
+  @operator('>')
+  gt(b: fp128<Q>): bool {
+    return i128.lt(b.value, this.value);
+  }
+
+  @operator('<=')
+  le(b: fp128<Q>): bool {
+    return !i128.lt(b.value, this.value);
+  }
+
+  @operator('>=')
+  ge(b: fp128<Q>): bool {
+    return !i128.lt(this.value, b.value);
+  }
+
+  /** 1 if this > b, -1 if this < b, 0 if equal */
+  @inline
+  ord(b: fp128<Q>): i32 {
+    return i128.ord(this.value, b.value);
+  }
+
+  min(b: fp128<Q>): fp128<Q> {
+    return i128.lt(b.value, this.value) ? b.clone() : this.clone();
+  }
+
+  max(b: fp128<Q>): fp128<Q> {
+    return i128.lt(this.value, b.value) ? b.clone() : this.clone();
+  }
+
+  /** -1, 0 or 1 */
+  @inline
+  sign(): i32 {
+    return i128.sign(this.value);
+  }
+
+  /** Absolute value (wraps for Min) */
+  abs(): fp128<Q> {
+    if (this.isNeg()) return this.neg();
+    setFixedOverflow(false);
+    return this.clone();
+  }
+
+  /** Integer part, rounded toward zero */
+  toI128(): i128 {
+    var r = new i128();
+    fixedTrunc(ptr(this.value), N, fractBitsOf<Q>(), ptr(r));
+    return r;
+  }
+
+  /** Integer part rounded toward zero, low 64 bits */
+  @inline
+  toI64(): i64 {
+    return this.toI128().toI64();
+  }
+
+  /** Integer part rounded toward zero, low 32 bits */
+  @inline
+  toI32(): i32 {
+    return this.toI128().toI32();
+  }
+
+  /**
+   * Convert to the nearest 64-bit float
+   */
+  toF64(): f64 {
+    // a single rounding, then an exact scaling by 2^-F
+    return this.value.toF64() * reinterpret<f64>(<u64>(1023 - fractBitsOf<Q>()) << 52);
+  }
+
+  @inline
+  toF32(): f32 {
+    return <f32>this.toF64();
+  }
+
+  clone(): fp128<Q> {
+    return new fp128<Q>(this.value.clone());
+  }
 }

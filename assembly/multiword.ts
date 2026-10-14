@@ -299,3 +299,37 @@ export function wordsFromString(str: string, radix: i32, ptr: usize, n: i32): bo
   if (isNeg) wordsNeg(ptr, n);
   return isNeg;
 }
+
+/**
+ * out[0..n) = ptr[0..n) << shift (bits shifted out are lost). `out` may be `ptr`.
+ */
+export function wordsShl(ptr: usize, n: i32, shift: i32, out: usize): void {
+  var ws = shift >> 5;
+  var bs = <u32>(shift & 31);
+  for (let i = n - 1; i >= 0; --i) {
+    let j = i - ws;
+    let hi: u32 = j >= 0 && j < n ? getW(ptr, j) : 0;
+    let lo: u32 = j - 1 >= 0 && j - 1 < n ? getW(ptr, j - 1) : 0;
+    setW(out, i, bs ? (hi << bs) | (lo >> (32 - bs)) : hi);
+  }
+}
+
+/**
+ * out[0..n) = ptr[0..n) >>> shift (logical). `out` may be `ptr`.
+ */
+export function wordsShr(ptr: usize, n: i32, shift: i32, out: usize): void {
+  var ws = shift >> 5;
+  var bs = <u32>(shift & 31);
+  for (let i = 0; i < n; ++i) {
+    let j = i + ws;
+    let lo: u32 = j < n ? getW(ptr, j) : 0;
+    let hi: u32 = j + 1 < n ? getW(ptr, j + 1) : 0;
+    setW(out, i, bs ? (lo >> bs) | (hi << (32 - bs)) : lo);
+  }
+}
+
+/** Number of significant bits of `ptr[0..n)` */
+export function wordsBitLength(ptr: usize, n: i32): i32 {
+  n = wordsLength(ptr, n);
+  return n == 0 ? 0 : (n << 5) - <i32>clz(getW(ptr, n - 1));
+}
