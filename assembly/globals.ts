@@ -640,7 +640,7 @@ export function __udivmod128_10(lo: u64, hi: u64): u64 {
   if (!hi) {
     __divmod_quot_hi = 0;
     if (lo < 10) {
-      __divmod_rem_lo = 0;
+      __divmod_rem_lo = lo;
       __divmod_rem_hi = 0;
       return 0;
     } else {

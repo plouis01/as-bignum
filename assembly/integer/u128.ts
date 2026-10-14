@@ -601,11 +601,7 @@ export class u128 {
    */
   @inline
   static ord(a: u128, b: u128): i32 {
-    var dlo = a.lo - b.lo;
-    var dhi = a.hi - b.hi;
-    var cmp = <i32>select<i64>(dhi, dlo, dhi != 0);
-    // normalize to [-1, 0, 1]
-    return i32(cmp > 0) - i32(cmp < 0);
+    return i32(u128.gt(a, b)) - i32(u128.lt(a, b));
   }
 
   /**
@@ -653,29 +649,9 @@ export class u128 {
    * @returns 128-bit unsigned integer
    */
   sqr(): this {
-    var u = this.lo,
-        v = this.hi;
-
-    var u1 = u & 0xFFFFFFFF;
-    var t  = u1 * u1;
-    var w  = t & 0xFFFFFFFF;
-    var k  = t >> 32;
-
-    u >>= 32;
-    var m = u * u1;
-    t = m + k;
-    var w1 = t >> 32;
-
-    t = m + (t & 0xFFFFFFFF);
-
-    var lo = (t << 32) + w;
-    var hi  = u * u;
-        hi += w1 + (t >> 32);
-        hi += u * v << 1;
-
+    var lo = __multi3(this.lo, this.hi, this.lo, this.hi);
+    this.hi = __res128_hi;
     this.lo = lo;
-    this.hi = hi;
-
     return this;
   }
 
