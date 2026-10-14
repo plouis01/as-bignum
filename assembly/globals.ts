@@ -1,5 +1,6 @@
 import { u256 } from './integer/u256';
 import { u128 } from './integer/u128';
+import { wordsLength, wordsClear, wordsNeg } from './multiword';
 
 // used for returning quotient and reminder from __divmod128
 @lazy export var __divmod_quot_hi: u64 = 0;
@@ -161,6 +162,62 @@ export function __mul256(x0: u64, x1: u64, x2: u64, x3: u64, y0: u64, y1: u64, y
   return new u256(lo1, lo2, hi1, hi2);
 }
 
+/**
+ * Convert the unsigned number `ptr[0..n)` (32-bit little-endian digits) to the nearest
+ * 64-bit float (ties to even).
+ */
+export function __floatFromWords(ptr: usize, n: i32): f64 {
+  n = wordsLength(ptr, n);
+  // fits in 64 bits: native conversion (the digits above n are zero)
+  if (n <= 2) return n == 0 ? 0.0 : <f64>(n == 1 ? <u64>load<u32>(ptr) : load<u64>(ptr));
+
+  // keep the top 64 bits, plus a sticky bit for the discarded ones: converting that to
+  // f64 rounds once, at the right position (the sticky bit is below the rounding bit)
+  var bits  = (n << 5) - <i32>clz(load<u32>(ptr + (<usize>(n - 1) << 2)));
+  var shift = bits - 64;
+  var wi = shift >> 5;
+  var b  = <u64>(shift & 31);
+  var w0 = <u64>load<u32>(ptr + (<usize>wi << 2));
+  var w1 = <u64>load<u32>(ptr + (<usize>(wi + 1) << 2));
+  var w2 = wi + 2 < n ? <u64>load<u32>(ptr + (<usize>(wi + 2) << 2)) : 0;
+  var top = ((w0 | (w1 << 32)) >> b) | (b ? w2 << (64 - b) : 0);
+
+  var sticky = (w0 & ((<u64>1 << b) - 1)) != 0;
+  for (let i = 0; !sticky && i < wi; ++i) {
+    sticky = load<u32>(ptr + (<usize>i << 2)) != 0;
+  }
+  top |= <u64>sticky;
+  // exact scaling by 2^shift
+  return <f64>top * reinterpret<f64>(<u64>(shift + 1023) << 52);
+}
+
+/**
+ * Store `trunc(value)` into `ptr[0..n)` (32-bit little-endian digits), keeping the low
+ * `32 * n` bits of its two's complement. Throws on NaN and infinity.
+ */
+export function __wordsFromFloat(value: f64, ptr: usize, n: i32): void {
+  if (!isFinite(value)) throw new RangeError("Conversion of a non-finite float");
+  wordsClear(ptr, n);
+  var neg = value < 0;
+  var t = Math.trunc(Math.abs(value));
+  if (t < 18446744073709551616.0) { // 2^64
+    let v = <u64>t;
+    store<u32>(ptr, <u32>v);
+    if (n > 1) store<u32>(ptr, <u32>(v >> 32), 4);
+  } else {
+    let raw  = reinterpret<u64>(t);
+    let exp  = <i32>((raw >> 52) & 0x7FF) - 1075; // value = mant * 2^exp, exp >= 12
+    let mant = (raw & 0x000FFFFFFFFFFFFF) | (<u64>1 << 52);
+    let wi = exp >> 5;
+    let b  = <u64>(exp & 31);
+    let lo = mant << b;
+    let hi = b ? mant >> (64 - b) : 0;
+    if (wi     < n) store<u32>(ptr + (<usize>wi << 2), <u32>lo);
+    if (wi + 1 < n) store<u32>(ptr + (<usize>(wi + 1) << 2), <u32>(lo >> 32));
+    if (wi + 2 < n) store<u32>(ptr + (<usize>(wi + 2) << 2), <u32>hi);
+  }
+  if (neg) wordsNeg(ptr, n);
+}
 // @ts-ignore: decorator
 @global
 export function __multi3(al: u64, ah: u64, bl: u64, bh: u64): u64 {

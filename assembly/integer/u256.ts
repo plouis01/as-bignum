@@ -1,7 +1,7 @@
 import { i128 } from './i128';
 import { u128 } from './u128';
 import { u256toDecimalString } from "../utils";
-import { __mul256 } from '../globals';
+import { __mul256, __floatFromWords, __wordsFromFloat } from '../globals';
 import {
   bufA, bufB, bufQ, bufR, bufP,
   wordsMul, wordsDivRem, wordsZeroFrom,
@@ -27,6 +27,12 @@ export class u256 {
   }
 
   @inline
+  static fromI128(value: i128): u256 {
+    var mask = value.hi >> 63;
+    return new u256(value.lo, value.hi, mask, mask);
+  }
+
+  @inline
   static fromU64(value: u64): u256 {
     return new u256(value);
   }
@@ -44,8 +50,13 @@ export class u256 {
 
   @inline
   static fromI32(value: i32): u256 {
-    var mask: u64 = value >> 63;
-    return new u256(value, mask, mask, mask);
+    var mask: u64 = value >> 31;
+    return new u256(<i64>value, mask, mask, mask);
+  }
+
+  @inline
+  static fromBool(value: bool): u256 {
+    return new u256(<u64>value);
   }
 
   @inline
@@ -128,43 +139,43 @@ export class u256 {
     );
   }
 
-  // TODO need improvement
-  // max safe uint for f64 actually 52-bits
-  @inline
+  /**
+   * Create from a float, truncating toward zero. Negative values give their two's
+   * complement, values of 2^256 or more keep their low 256 bits.
+   * Throws on NaN and infinity.
+   */
   static fromF64(value: f64): u256 {
-    var mask = u64(reinterpret<i64>(value) >> 63);
-    return new u256(<u64>value, mask, mask, mask);
+    __wordsFromFloat(value, bufA, 8);
+    return u256.load(bufA);
   }
 
-  // TODO need improvement
-  // max safe int for f32 actually 23-bits
   @inline
   static fromF32(value: f32): u256 {
-    var mask = u64(reinterpret<i32>(value) >> 31);
-    return new u256(<u64>value, mask, mask, mask);
+    return u256.fromF64(<f64>value);
   }
 
   /**
- * Create 256-bit unsigned integer from generic type T
- * @param  value
- * @returns 256-bit unsigned integer
- */
+   * Create 256-bit unsigned integer from generic type T
+   * @param  value
+   * @returns 256-bit unsigned integer
+   */
   @inline
   static from<T>(value: T): u256 {
-    if (value instanceof bool) return u256.fromU64(<u64>value);
-    else if (value instanceof i8) return u256.fromI64(<i64>value);
-    else if (value instanceof u8) return u256.fromU64(<u64>value);
-    else if (value instanceof i16) return u256.fromI64(<i64>value);
-    else if (value instanceof u16) return u256.fromU64(<u64>value);
-    else if (value instanceof i32) return u256.fromI64(<i64>value);
-    else if (value instanceof u32) return u256.fromU64(<u64>value);
-    else if (value instanceof i64) return u256.fromI64(<i64>value);
-    else if (value instanceof u64) return u256.fromU64(<u64>value);
-    else if (value instanceof f32) return u256.fromF64(<f64>value);
-    else if (value instanceof f64) return u256.fromF64(<f64>value);
-    else if (value instanceof u128) return u256.fromU128(<u128>value);
-    else if (value instanceof u256) return u256.fromU256(<u256>value);
-    else if (value instanceof u8[]) return u256.fromBytes(<u8[]>value);
+         if (value instanceof bool)       return u256.fromU64(<u64>value);
+    else if (value instanceof i8)         return u256.fromI64(<i64>value);
+    else if (value instanceof u8)         return u256.fromU64(<u64>value);
+    else if (value instanceof i16)        return u256.fromI64(<i64>value);
+    else if (value instanceof u16)        return u256.fromU64(<u64>value);
+    else if (value instanceof i32)        return u256.fromI64(<i64>value);
+    else if (value instanceof u32)        return u256.fromU64(<u64>value);
+    else if (value instanceof i64)        return u256.fromI64(<i64>value);
+    else if (value instanceof u64)        return u256.fromU64(<u64>value);
+    else if (value instanceof f32)        return u256.fromF64(<f64>value);
+    else if (value instanceof f64)        return u256.fromF64(<f64>value);
+    else if (value instanceof i128)       return u256.fromI128(<i128>value);
+    else if (value instanceof u128)       return u256.fromU128(<u128>value);
+    else if (value instanceof u256)       return u256.fromU256(<u256>value);
+    else if (value instanceof u8[])       return u256.fromBytes(<u8[]>value);
     else if (value instanceof Uint8Array) return u256.fromBytes(<Uint8Array>value);
     else throw new TypeError("Unsupported generic type");
   }
@@ -215,8 +226,8 @@ export class u256 {
 
   @inline
   setI32(value: i32): this {
-    var mask: u64 = value >> 63;
-    this.lo1 = value;
+    var mask: u64 = value >> 31;
+    this.lo1 = <i64>value;
     this.lo2 = mask;
     this.hi1 = mask;
     this.hi2 = mask;
@@ -677,16 +688,12 @@ export class u256 {
   }
 
   /**
-   * Convert to 128-bit signed integer
-   * @return 256-bit signed integer
+   * Convert to 128-bit signed integer (low 128 bits)
+   * @return 128-bit signed integer
    */
   @inline
   toI128(): i128 {
-    return new i128(
-      this.lo1,
-      (this.lo2 & 0x7FFFFFFFFFFFFFFF) |
-      (this.hi2 & 0x8000000000000000)
-    );
+    return new i128(this.lo1, this.lo2);
   }
 
   /**
@@ -699,15 +706,12 @@ export class u256 {
   }
 
   /**
-   * Convert to 64-bit signed integer
+   * Convert to 64-bit signed integer (low 64 bits)
    * @return 64-bit signed integer
    */
   @inline
   toI64(): i64 {
-    return <i64>(
-      (this.lo1 & 0x7FFFFFFFFFFFFFFF) |
-      (this.hi2 & 0x8000000000000000)
-    );
+    return <i64>this.lo1;
   }
 
   /**
@@ -720,12 +724,12 @@ export class u256 {
   }
 
   /**
-   * Convert to 32-bit signed integer
+   * Convert to 32-bit signed integer (low 32 bits)
    * @return 32-bit signed integer
    */
   @inline
   toI32(): i32 {
-    return <i32>this.toI64();
+    return <i32>this.lo1;
   }
 
   /**
@@ -744,6 +748,24 @@ export class u256 {
   @inline
   toBool(): bool {
     return <bool>(this.lo1 | this.lo2 | this.hi1 | this.hi2);
+  }
+
+  /**
+   * Convert to 64-bit float, rounded to nearest (ties to even)
+   * @returns 64-bit float
+   */
+  toF64(): f64 {
+    this.store(bufA);
+    return __floatFromWords(bufA, 8);
+  }
+
+  /**
+   * Convert to 32-bit float
+   * @returns 32-bit float
+   */
+  @inline
+  toF32(): f32 {
+    return <f32>this.toF64();
   }
 
   @inline
@@ -773,31 +795,33 @@ export class u256 {
 
   /**
    * Convert to generic type `T`. Useful inside other generics methods
-   * @param  T  is <bool | i8 | u8 | i16 | u16 | i32 | u32 | i64 | u64 | f32 | f64 | i128 | u128 | u256 | u8[] | Uint8Array | `StaticArray<u8>` | string>
+   * @param  T  is <bool | i8 | u8 | i16 | u16 | i32 | u32 | i64 | u64 | f32 | f64 | i128 | u128 | i256 | u256 | u8[] | Uint8Array | `StaticArray<u8>` | string>
    * @returns   type of `T`
    */
   @inline
   as<T>(): T {
-    var dummy!: T;
-         if (dummy instanceof bool)       return <T>this.toBool();
-    else if (dummy instanceof i8)         return <T>this.toI64();
-    else if (dummy instanceof u8)         return <T>this.toU64();
-    else if (dummy instanceof i16)        return <T>this.toI64();
-    else if (dummy instanceof u16)        return <T>this.toU64();
-    else if (dummy instanceof i32)        return <T>this.toI64();
-    else if (dummy instanceof i64)        return <T>this.toI64();
-    else if (dummy instanceof u32)        return <T>this.toU64();
-    else if (dummy instanceof u64)        return <T>this.toU64();
-    // else if (dummy instanceof f32)        return <T>this.toF64();
-    // else if (dummy instanceof f64)        return <T>this.toF64();
-    else if (dummy instanceof i128)       return <T>this.toI128();
-    else if (dummy instanceof u128)       return <T>this.toU128();
-    else if (dummy instanceof u256)       return <T>this.toU256();
-    else if (dummy instanceof u8[])       return <T>this.toBytes();
-    else if (dummy instanceof Uint8Array) return <T>this.toUint8Array();
-    else if (dummy instanceof StaticArray<u8>) return <T>this.toStaticBytes();
-    else if (dummy instanceof String)     return <T>this.toString();
-    else throw new TypeError('Unsupported generic type');
+    if (isBoolean<T>()) {
+      return <T>this.toBool();
+    } else if (isInteger<T>()) {
+      if (isSigned<T>()) {
+        return <T>this.toI64();
+      } else {
+        return <T>this.toU64();
+      }
+    } else if (isFloat<T>()) {
+      return <T>this.toF64();
+    } else if (isString<T>()) {
+      return <T>this.toString();
+    } else if (isReference<T>()) {
+      let dummy = changetype<T>(0);
+           if (dummy instanceof u8[])            return <T>this.toBytes();
+      else if (dummy instanceof StaticArray<u8>) return <T>this.toStaticBytes();
+      else if (dummy instanceof Uint8Array)      return <T>this.toUint8Array();
+      else if (dummy instanceof i128)            return <T>this.toI128();
+      else if (dummy instanceof u128)            return <T>this.toU128();
+      else if (dummy instanceof u256)            return <T>this;
+      else throw new TypeError('Unsupported generic type');
+    } else throw new TypeError('Unsupported generic type');
   }
 
   /**

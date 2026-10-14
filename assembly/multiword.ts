@@ -175,3 +175,13 @@ export function wordsDivRem(u: usize, m: i32, v: usize, n: i32, q: usize, r: usi
   }
   setW(r, nn - 1, getW(un, nn - 1) >> s);
 }
+
+/** ptr[0..n) = -ptr[0..n) (two's complement, in place) */
+export function wordsNeg(ptr: usize, n: i32): void {
+  var c: u64 = 1;
+  for (let i = 0; i < n; ++i) {
+    let t = <u64>(~getW(ptr, i)) + c;
+    setW(ptr, i, <u32>t);
+    c = t >> 32;
+  }
+}

@@ -24,6 +24,7 @@ import {
   bufA, bufB, bufQ, bufR, bufP,
   wordsMul, wordsDivRem, wordsZeroFrom,
 } from '../multiword';
+import { __floatFromWords, __wordsFromFloat } from '../globals';
 
 @lazy const HEX_CHARS = '0123456789abcdef';
 
@@ -69,18 +70,19 @@ export class u128 {
     return new u128(value);
   }
 
-  // TODO need improvement
-  // max safe uint for f64 actually 53-bits
-  @inline
+  /**
+   * Create from a float, truncating toward zero. Negative values give their two's
+   * complement, values of 2^128 or more keep their low 128 bits.
+   * Throws on NaN and infinity.
+   */
   static fromF64(value: f64): u128 {
-    return new u128(<u64>value, reinterpret<i64>(value) >> 63);
+    __wordsFromFloat(value, bufA, 4);
+    return new u128(load<u64>(bufA), load<u64>(bufA, 8));
   }
 
-  // TODO need improvement
-  // max safe int for f32 actually 23-bits
   @inline
   static fromF32(value: f32): u128 {
-    return new u128(<u64>value, <u64>(reinterpret<i32>(value) >> 31));
+    return u128.fromF64(<f64>value);
   }
 
   @inline
@@ -791,15 +793,12 @@ export class u128 {
   }
 
   /**
-  * Convert to 64-bit signed integer
+  * Convert to 64-bit signed integer (low 64 bits)
   * @returns 64-bit signed integer
   */
   @inline
   toI64(): i64 {
-    return <i64>(
-      (this.lo & 0x7FFFFFFFFFFFFFFF) |
-      (this.hi & 0x8000000000000000)
-    );
+    return <i64>this.lo;
   }
 
   /**
@@ -812,12 +811,12 @@ export class u128 {
   }
 
   /**
-  * Convert to 32-bit signed integer
+  * Convert to 32-bit signed integer (low 32 bits)
   * @returns 32-bit signed integer
   */
   @inline
   toI32(): i32 {
-    return <i32>this.toI64();
+    return <i32>this.lo;
   }
 
   /**
