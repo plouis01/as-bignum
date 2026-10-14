@@ -1126,18 +1126,25 @@ describe("Multiply and Division without Overflow", () => {
     expect(u128.muldiv(a, b, c)).toStrictEqual(new u128(123455));
   });
 
-  it("Should muldiv big arguments with overflow 128-bits 1", () => {
-    let a = new u128(17368525644200112449, 244614);
-    let b = new u128(4017580189248773693, 12699);
-    let c = new u128(3434515);
-    expect(u128.muldiv(a, b, c)).toStrictEqual(new u128(12770041117111790654, 8684128842189806128));
+  it("Should muldiv when only the intermediate product overflows", () => {
+    // (2^128 - 1) * (2^128 - 1) / (2^128 - 1)
+    expect(u128.muldiv(u128.Max, u128.Max, u128.Max)).toStrictEqual(u128.Max);
+    // 2^127 * 6 / 4 = 3 * 2^126
+    let a = new u128(0, 0x8000000000000000);
+    expect(u128.muldiv(a, new u128(6), new u128(4))).toStrictEqual(new u128(0, 0xC000000000000000));
   });
 
-  it("Should muldiv big arguments with overflow 128-bits 2", () => {
-    let a = u128.Max;
-    let b = new u128(0x7FFFFFFFFFFFFFFF, 0x8111111111111111);
-    let c = new u128(0x3333333333333333);
-    expect(u128.muldiv(a, b, c)).toStrictEqual(new u128(9223372036854775803, 384307168202282322));
+  it("Should muldivUp round up", () => {
+    expect(u128.muldivUp(new u128(10), new u128(10), new u128(3))).toStrictEqual(new u128(34));
+    expect(u128.muldivUp(new u128(10), new u128(9), new u128(3))).toStrictEqual(new u128(30));
+  });
+
+  it("Should mulmod and addmod with a full precision intermediate", () => {
+    // (2^128 - 1)^2 mod (2^128 - 2) = 1
+    let m = u128.Max - u128.One;
+    expect(u128.mulmod(u128.Max, u128.Max, m)).toStrictEqual(u128.One);
+    // (2^128 - 1) + (2^128 - 1) mod (2^128 - 2) = 2
+    expect(u128.addmod(u128.Max, u128.Max, m)).toStrictEqual(new u128(2));
   });
 });
 
@@ -1254,6 +1261,14 @@ describe("Throwable", () => {
     expect(() => {
       let a = new u128(1, 1);
       !(u128.muldiv(a, a, u128.Zero));
+    }).toThrow();
+  });
+
+  it("Should throw when the muldiv result doesn't fit", () => {
+    expect(() => {
+      let a = new u128(17368525644200112449, 244614);
+      let b = new u128(4017580189248773693, 12699);
+      !(u128.muldiv(a, b, new u128(3434515)));
     }).toThrow();
   });
 });

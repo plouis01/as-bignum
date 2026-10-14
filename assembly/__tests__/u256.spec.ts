@@ -698,4 +698,10 @@ describe("Throwable", () => {
       !(new u256(1, 2, 3, 4) % u256.Zero);
     }).toThrow();
   });
+
+  it("Should throw when the muldiv result doesn't fit", () => {
+    expect(() => {
+      !(u256.muldiv(u256.Max, u256.Max, u256.One));
+    }).toThrow();
+  });
 });

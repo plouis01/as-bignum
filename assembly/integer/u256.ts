@@ -3,8 +3,8 @@ import { u128 } from './u128';
 import { u256toDecimalString } from "../utils";
 import { __mul256 } from '../globals';
 import {
-  bufA, bufB, bufQ, bufR,
-  wordsDivRem,
+  bufA, bufB, bufQ, bufR, bufP,
+  wordsMul, wordsDivRem, wordsZeroFrom,
 } from '../multiword';
 
 @lazy const HEX_CHARS = '0123456789abcdef';
@@ -438,6 +438,17 @@ export class u256 {
   }
 
   /**
+   * Full 512-bit product of `a` and `b` into `bufP` (16 digits).
+   * Returns true if the product doesn't fit in 256 bits.
+   */
+  static mulFull(a: u256, b: u256): bool {
+    a.store(bufA);
+    b.store(bufB);
+    wordsMul(bufA, 8, bufB, 8, bufP);
+    return !wordsZeroFrom(bufP, 8, 16);
+  }
+
+  /**
    * Quotient, rounded down. Throws on division by zero.
    */
   @operator('/')
@@ -479,6 +490,59 @@ export class u256 {
   }
 
   /**
+   * Calculate `a * b / c` rounded down, with a full precision (512-bit) intermediate
+   * product, like OpenZeppelin's `Math.mulDiv`.
+   * Throws if `c` is zero or if the result doesn't fit in 256 bits.
+   */
+  static muldiv(a: u256, b: u256, c: u256): u256 {
+    if (c.isZero()) throw new RangeError("Division by zero");
+    u256.mulFull(a, b);
+    c.store(bufB);
+    wordsDivRem(bufP, 16, bufB, 8, bufQ, bufR);
+    if (!wordsZeroFrom(bufQ, 8, 16)) throw new RangeError("Overflow in muldiv");
+    return u256.load(bufQ);
+  }
+
+  /**
+   * Same as `muldiv`, rounded up.
+   */
+  static muldivUp(a: u256, b: u256, c: u256): u256 {
+    var q = u256.muldiv(a, b, c);
+    if (!wordsZeroFrom(bufR, 0, 8)) {
+      if (q == u256.Max) throw new RangeError("Overflow in muldiv");
+      q.preInc();
+    }
+    return q;
+  }
+
+  /**
+   * `(a * b) % c` computed with a full precision product, like Solidity's `mulmod`.
+   * Throws if `c` is zero.
+   */
+  static mulmod(a: u256, b: u256, c: u256): u256 {
+    if (c.isZero()) throw new RangeError("Division by zero");
+    u256.mulFull(a, b);
+    c.store(bufB);
+    wordsDivRem(bufP, 16, bufB, 8, bufQ, bufR);
+    return u256.load(bufR);
+  }
+
+  /**
+   * `(a + b) % c` computed without overflow, like Solidity's `addmod`.
+   * Throws if `c` is zero.
+   */
+  static addmod(a: u256, b: u256, c: u256): u256 {
+    if (c.isZero()) throw new RangeError("Division by zero");
+    var sum = u256.add(a, b);
+    var carry = u256.lt(sum, a);
+    sum.store(bufP);
+    store<u64>(bufP, <u64>carry, 32);
+    c.store(bufB);
+    wordsDivRem(bufP, 10, bufB, 8, bufQ, bufR);
+    return u256.load(bufR);
+  }
+
+  /**
    * Calculate power of base with exponent (wrapping on overflow).
    * Negative exponents give zero (or one if `base` is one).
    */
@@ -494,6 +558,28 @@ export class u256 {
       if (exponent) tmp = u256.mul(tmp, tmp);
     }
     return result;
+  }
+
+  @inline
+  static sqr(value: u256): u256 {
+    return u256.mul(value, value);
+  }
+
+  /**
+   * Integer square root, rounded down.
+   */
+  static sqrt(value: u256): u256 {
+    if (u256.lt(value, new u256(2))) return value.clone();
+    // start from a power of two not smaller than the root, then Newton's method
+    // decreases monotonically to floor(sqrt(value))
+    var bits = 256 - u256.clz(value);
+    var x = u256.shl(u256.One, (bits + 1) >> 1);
+    while (true) {
+      let y = u256.shr(u256.add(x, u256.div(value, x)), 1);
+      if (!u256.lt(y, x)) return x;
+      x = y;
+    }
+    return x;
   }
 
   @inline

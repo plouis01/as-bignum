@@ -20,6 +20,10 @@ import {
 } from '../globals';
 
 import { atou128, u128toDecimalString } from '../utils';
+import {
+  bufA, bufB, bufQ, bufR, bufP,
+  wordsMul, wordsDivRem, wordsZeroFrom,
+} from '../multiword';
 
 @lazy const HEX_CHARS = '0123456789abcdef';
 
@@ -664,53 +668,80 @@ export class u128 {
   }
 
   /**
-   * Calculate multiply and division as `number * numerator / denominator`
-   * without overflow in multiplication part.
+   * Calculate `number * numerator / denominator` rounded down, with a full precision
+   * (256-bit) intermediate product, like OpenZeppelin's `Math.mulDiv`.
+   * Throws if `denominator` is zero or if the result doesn't fit in 128 bits.
    *
    * @returns 128-bit unsigned integer
    */
   static muldiv(number: u128, numerator: u128, denominator: u128): u128 {
-    let a = number;
-    let b = numerator;
-    let c = denominator;
+    u128.mulFull(number, numerator);
+    u128.divProduct(denominator);
+    return new u128(load<u64>(bufQ), load<u64>(bufQ, 8));
+  }
 
-    let ql = __udivmod128(b.lo, b.hi, c.lo, c.hi);
-
-    let qn = new u128(ql, __divmod_quot_hi);             // b / c
-    let rn = new u128(__divmod_rem_lo, __divmod_rem_hi); // b % c
-
-    let q = u128.Zero;
-    let r = u128.Zero;
-    let n = a.clone();
-
-    while (!n.isZero()) {
-      if (n.lo & 1) {
-        // @ts-ignore
-        q += qn;
-        // @ts-ignore
-        r += rn;
-        if (r >= c) {
-          // @ts-ignore
-          ++q;
-          // @ts-ignore
-          r -= c;
-        }
-      }
-      // @ts-ignore
-      n >>= 1;
-      // @ts-ignore
-      qn <<= 1;
-      // @ts-ignore
-      rn <<= 1;
-
-      if (rn >= c) {
-        // @ts-ignore
-        ++qn;
-        // @ts-ignore
-        rn -= c;
-      }
+  /**
+   * Same as `muldiv`, rounded up.
+   */
+  static muldivUp(number: u128, numerator: u128, denominator: u128): u128 {
+    var q = u128.muldiv(number, numerator, denominator);
+    if (!wordsZeroFrom(bufR, 0, 4)) {
+      if (q == u128.Max) throw new RangeError("Overflow in muldiv");
+      q.preInc();
     }
     return q;
+  }
+
+  /**
+   * `(a * b) % c` computed with a full precision product, like Solidity's `mulmod`.
+   * Throws if `c` is zero.
+   */
+  static mulmod(a: u128, b: u128, c: u128): u128 {
+    if (c.isZero()) throw new RangeError("Division by zero");
+    u128.mulFull(a, b);
+    store<u64>(bufB, c.lo);
+    store<u64>(bufB, c.hi, 8);
+    wordsDivRem(bufP, 8, bufB, 4, bufQ, bufR);
+    return new u128(load<u64>(bufR), load<u64>(bufR, 8));
+  }
+
+  /**
+   * `(a + b) % c` computed without overflow, like Solidity's `addmod`.
+   * Throws if `c` is zero.
+   */
+  static addmod(a: u128, b: u128, c: u128): u128 {
+    if (c.isZero()) throw new RangeError("Division by zero");
+    var sum = u128.add(a, b);
+    store<u64>(bufP, sum.lo);
+    store<u64>(bufP, sum.hi, 8);
+    store<u64>(bufP, <u64>u128.lt(sum, a), 16);
+    store<u64>(bufB, c.lo);
+    store<u64>(bufB, c.hi, 8);
+    wordsDivRem(bufP, 6, bufB, 4, bufQ, bufR);
+    return new u128(load<u64>(bufR), load<u64>(bufR, 8));
+  }
+
+  /**
+   * Full 256-bit product of `a` and `b` into `bufP` (8 digits).
+   * Returns true if the product doesn't fit in 128 bits.
+   */
+  static mulFull(a: u128, b: u128): bool {
+    store<u64>(bufA, a.lo);
+    store<u64>(bufA, a.hi, 8);
+    store<u64>(bufB, b.lo);
+    store<u64>(bufB, b.hi, 8);
+    wordsMul(bufA, 4, bufB, 4, bufP);
+    return !wordsZeroFrom(bufP, 4, 8);
+  }
+
+  // divide the product in bufP by `denominator`: quotient into bufQ, remainder into bufR.
+  // Throws on division by zero and if the quotient doesn't fit in 128 bits.
+  private static divProduct(denominator: u128): void {
+    if (denominator.isZero()) throw new RangeError("Division by zero");
+    store<u64>(bufB, denominator.lo);
+    store<u64>(bufB, denominator.hi, 8);
+    wordsDivRem(bufP, 8, bufB, 4, bufQ, bufR);
+    if (!wordsZeroFrom(bufQ, 4, 8)) throw new RangeError("Overflow in muldiv");
   }
 
   /**

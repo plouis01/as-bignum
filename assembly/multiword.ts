@@ -25,6 +25,8 @@
 @lazy export const bufQ = memory.data(MAX_WORDS << 2, 8);
 // @ts-ignore: decorator
 @lazy export const bufR = memory.data(MAX_WORDS << 2, 8);
+// @ts-ignore: decorator
+@lazy export const bufP = memory.data(MAX_WORDS << 2, 8);
 
 // @ts-ignore: decorator
 @inline function getW(ptr: usize, i: i32): u32 {
@@ -54,6 +56,25 @@ export function wordsZeroFrom(ptr: usize, from: i32, n: i32): bool {
     if (getW(ptr, i) != 0) return false;
   }
   return true;
+}
+
+/**
+ * w[0..m+n) = a[0..m) * b[0..n)
+ * `w` must not overlap `a` or `b`.
+ */
+export function wordsMul(a: usize, m: i32, b: usize, n: i32, w: usize): void {
+  wordsClear(w, m + n);
+  for (let j = 0; j < n; ++j) {
+    let bj = <u64>getW(b, j);
+    if (bj == 0) continue;
+    let k: u64 = 0;
+    for (let i = 0; i < m; ++i) {
+      let t = <u64>getW(a, i) * bj + <u64>getW(w, i + j) + k;
+      setW(w, i + j, <u32>t);
+      k = t >> 32;
+    }
+    setW(w, j + m, <u32>k);
+  }
 }
 
 /**
