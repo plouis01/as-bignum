@@ -2,6 +2,7 @@ import { fp128 } from "./fp128";
 import { fp256 } from "./fp256";
 import { u128 } from "../integer/u128";
 import { fp128Safe } from "./safe/fp128";
+import { fp256Safe } from "./safe/fp256";
 import {
   u24, u40, u48, u56, u72, u80, u88, u96, u104, u112, u120,
   u136, u144, u152, u160, u168, u176, u184, u192,
@@ -49,5 +50,5 @@ export type fp256x176 = fp256<u176>;
 export type fp256x184 = fp256<u184>;
 export type fp256x192 = fp256<u192>;
 
-export { fp128, fp256, fp128Safe };
+export { fp128, fp256, fp128Safe, fp256Safe };
 export * from "./types";

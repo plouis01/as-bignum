@@ -1,6 +1,6 @@
 // fp256 is the same code as fp128 on 256 bits: generate it so that both stay in sync.
-// Run `node scripts/generate-fp256.mjs` after editing assembly/fixed/fp128.ts
-// (`--check` fails if the generated file is outdated).
+// Run `node scripts/generate-fp256.mjs` after editing assembly/fixed/fp128.ts or
+// assembly/fixed/safe/fp128.ts (`--check` fails if the generated files are outdated).
 
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -47,6 +47,7 @@ function generate(source) {
 let outdated = false;
 for (const [src, dst] of [
   ["assembly/fixed/fp128.ts", "assembly/fixed/fp256.ts"],
+  ["assembly/fixed/safe/fp128.ts", "assembly/fixed/safe/fp256.ts"],
 ]) {
   const generated = generate(readFileSync(join(root, src), "utf8"));
   const path = join(root, dst);
