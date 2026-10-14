@@ -231,17 +231,17 @@ export class u128 {
     return !(this.lo | this.hi);
   }
 
-  @inline @operator.prefix('~')
+  @operator.prefix('~')
   not(): u128 {
     return new u128(~this.lo, ~this.hi);
   }
 
-  @inline @operator.prefix('+')
+  @operator.prefix('+')
   pos(): u128 {
     return this;
   }
 
-  @inline @operator.prefix('-')
+  @operator.prefix('-')
   neg(): u128 {
     var lo = ~this.lo;
     var hi = ~this.hi;
